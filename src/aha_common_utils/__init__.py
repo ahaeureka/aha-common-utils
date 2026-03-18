@@ -15,6 +15,12 @@ if TYPE_CHECKING:
         get_registry,
         register_config,
     )
+    from .settings import (
+        SecureBaseSettings,
+        build_layered_env_files,
+        build_toml_config_files,
+        build_sensitive_env_file,
+    )
     from .path_utils import find_env_files_recursive, find_project_root
     from .register import ProviderRegistry, register_provider, register_provider_group
     from .snowflake_id import (
@@ -38,6 +44,11 @@ __all__ = [
     "get_registry",
     "get_config_class",
     "get_main_config_class",
+    # 安全分层配置
+    "SecureBaseSettings",
+    "build_toml_config_files",
+    "build_sensitive_env_file",
+    "build_layered_env_files",  # 向后兼容
     # 路径工具
     "find_project_root",
     "find_env_files_recursive",
@@ -129,5 +140,19 @@ def __getattr__(name: str) -> Any:
         from .tracing import get_tracer, setup_tracing
 
         return {"setup_tracing": setup_tracing, "get_tracer": get_tracer}[name]
+
+    if name in {"SecureBaseSettings", "build_layered_env_files", "build_toml_config_files", "build_sensitive_env_file"}:
+        from .settings import (
+            SecureBaseSettings,
+            build_layered_env_files,
+            build_sensitive_env_file,
+            build_toml_config_files,
+        )
+        return {
+            "SecureBaseSettings": SecureBaseSettings,
+            "build_layered_env_files": build_layered_env_files,
+            "build_toml_config_files": build_toml_config_files,
+            "build_sensitive_env_file": build_sensitive_env_file,
+        }[name]
 
     raise AttributeError(f"module '' has no attribute '{name}'")
