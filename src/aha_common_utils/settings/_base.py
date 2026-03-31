@@ -159,7 +159,7 @@ class SecureBaseSettings(BaseSettings):
         if app_env != "production":
             return self
 
-        for field_name in self.model_fields:
+        for field_name in self.model_fields:  # pylint: disable=not-an-iterable
             if not self._field_is_sensitive(field_name):
                 continue
             value = getattr(self, field_name, None)
@@ -183,7 +183,7 @@ class SecureBaseSettings(BaseSettings):
     def __repr__(self) -> str:
         """屏蔽敏感字段的安全 repr，防止密钥意外出现在日志中。"""
         parts: list[str] = []
-        for field_name in self.model_fields:
+        for field_name in self.model_fields:  # pylint: disable=not-an-iterable
             value = getattr(self, field_name, None)
             if self._field_is_sensitive(field_name) and value:
                 parts.append(f"{field_name}={mask_value(value)}")
@@ -205,7 +205,7 @@ class SecureBaseSettings(BaseSettings):
             {'APP_ENV': 'development', 'DATABASE_URL': 'post****', ...}
         """
         result: dict[str, Any] = {}
-        for field_name in self.model_fields:
+        for field_name in self.model_fields:  # pylint: disable=not-an-iterable
             value = getattr(self, field_name, None)
             if self._field_is_sensitive(field_name) and value:
                 result[field_name] = mask_value(value)

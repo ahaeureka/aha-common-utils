@@ -159,8 +159,7 @@ class ConfigLoader:
         # 实例化配置
         if config_overrides:
             return DynamicSettings(**config_overrides)
-        else:
-            return DynamicSettings()
+        return DynamicSettings()
 
     def _ensure_providers_imported(self, modules: Optional[list[str]] = None):
         """确保所有 provider 被导入（触发装饰器执行）
@@ -192,7 +191,7 @@ class ConfigLoader:
                     continue
 
                 # 只扫描 base 和直接实现目录
-                for importer, modname, ispkg in pkgutil.walk_packages(
+                for _, modname, _ in pkgutil.walk_packages(
                     path=package.__path__, prefix=package_name + ".", onerror=lambda x: None
                 ):
                     # 只导入 base 模块和一级实现模块（避免深度递归）
@@ -273,7 +272,7 @@ class ConfigLoader:
                         configs_by_group[config_name][provider_name] = config_cls
 
             # 为每个配置组创建字段（包含 provider 字段和具体 provider 配置）
-            for config_name, providers in configs_by_group.items():
+            for config_name in configs_by_group:
                 if config_name not in annotations:  # 避免覆盖已注册的配置
                     # 添加 {config_name} 字段（包含 provider 和所有 provider 的配置）
                     annotations[config_name] = Dict[str, Any]
@@ -343,9 +342,9 @@ class ConfigLoader:
 
         if self.toml_file:
             return parse_config_file(self.toml_file)
-        elif self.yaml_file:
+        if self.yaml_file:
             return parse_config_file(self.yaml_file)
-        elif self.json_file:
+        if self.json_file:
             return parse_config_file(self.json_file)
         return None
 

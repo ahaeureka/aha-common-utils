@@ -49,9 +49,9 @@ def parse_config_file(config_file: str | Path) -> Dict[str, Any]:
     # 读取并解析配置文件
     if suffix in [".yaml", ".yml"]:
         return _parse_yaml(config_file)
-    elif suffix == ".toml":
+    if suffix == ".toml":
         return _parse_toml(config_file)
-    elif suffix == ".json":
+    if suffix == ".json":
         return _parse_json(config_file)
     else:
         raise ValueError(f"Unsupported config file format: {suffix}. Supported: .yaml, .yml, .toml, .json")
@@ -120,8 +120,8 @@ def _parse_yaml(config_file: str | Path) -> Dict[str, Any]:
 
         with open(config_file, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
-    except ImportError:
-        raise ValueError("PyYAML is not installed. Install it with: pip install pyyaml")
+    except ImportError as exc:
+        raise ValueError("PyYAML is not installed. Install it with: pip install pyyaml") from exc
 
 
 def _parse_toml(config_file: str | Path) -> Dict[str, Any]:
@@ -137,8 +137,8 @@ def _parse_toml(config_file: str | Path) -> Dict[str, Any]:
 
             with open(config_file, "r", encoding="utf-8") as f:
                 return toml.load(f)
-        except ImportError:
-            raise ValueError("TOML parser not installed. Install with: pip install tomli (or toml)")
+        except ImportError as exc:
+            raise ValueError("TOML parser not installed. Install with: pip install tomli (or toml)") from exc
 
 
 def _parse_json(config_file: str | Path) -> Dict[str, Any]:
@@ -499,10 +499,10 @@ def create_settings_class(
     """
     try:
         from pydantic_settings import BaseSettings, SettingsConfigDict
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "pydantic-settings is required for this feature. Install it with: pip install pydantic-settings"
-        )
+        ) from exc
 
     # 构建字段字典
     annotations = {}

@@ -325,8 +325,9 @@ class ProviderRegistry:
         if cls._lock is None or cls._shared_registry is None:
             return
         try:
-            with cls._lock:
-                cls._shared_registry[name] = (module_path, class_name, singleton)
+            with cls._lock:  # pylint: disable=not-context-manager
+                cls._shared_registry[name] = (
+                    module_path, class_name, singleton)  # pylint: disable=unsupported-assignment-operation
                 logger.debug(f"[ProviderRegistry] Synced {name} to shared registry")
         except Exception as e:
             logger.warning(f"[ProviderRegistry] Failed to sync {name}: {e}")
@@ -346,10 +347,11 @@ class ProviderRegistry:
         cls._multiprocessing_enabled = True
 
         # 同步所有已注册的类到共享注册表
-        with cls._lock:
+        with cls._lock:  # pylint: disable=not-context-manager
             for name, (module_path, class_name) in cls._registry_info.items():
                 singleton = cls._singleton_flags.get(name, True)
-                cls._shared_registry[name] = (module_path, class_name, singleton)
+                cls._shared_registry[name] = (
+                    module_path, class_name, singleton)  # pylint: disable=unsupported-assignment-operation
 
         logger.info(f"[ProviderRegistry] Multiprocessing enabled, synced {len(cls._registry_info)} providers")
 
@@ -658,10 +660,9 @@ class ProviderRegistry:
             if not config_override and not kwargs:
                 logger.debug(f"Returning cached singleton instance for {provider_name}")
                 return cls._instances[provider_name]
-            else:
-                # 只有 config_override 或 kwargs 时才清除旧实例
-                logger.debug(f"Clearing cached instance for {provider_name} due to parameter override")
-                cls.clear_instance(provider_name)
+            # 只有 config_override 或 kwargs 时才清除旧实例
+            logger.debug(f"Clearing cached instance for {provider_name} due to parameter override")
+            cls.clear_instance(provider_name)
 
         # 4. 加载配置
         params = {}
@@ -832,13 +833,13 @@ class RegistryManager:
             return
 
         try:
-            with cls._lock:
+            with cls._lock:  # pylint: disable=not-context-manager
                 if cls._shared_registry is None:
                     logger.warning(f"Shared registry not initialized, cannot register {name}")
                     return
                 module = class_type.__module__
                 qualname = class_type.__qualname__
-                cls._shared_registry[name] = (module, qualname)
+                cls._shared_registry[name] = (module, qualname)  # pylint: disable=unsupported-assignment-operation
                 logger.debug(f"Registered {name} -> {module}.{qualname} to shared registry")
         except Exception as e:
             logger.warning(f"Failed to register {name} to shared registry: {e}")
@@ -964,13 +965,9 @@ class SingletonRegisterMeta(SingletonMeta, RegsiterMeta, ABCMeta):
     4. 可选的跨进程注册表共享
     """
 
-    pass
-
 
 class RegisterABCMeta(RegsiterMeta, ABCMeta):
     """注册 + 抽象基类的组合元类"""
-
-    pass
 
 
 class ClassFactory:
