@@ -26,9 +26,14 @@ dependencies = [
     "opentelemetry-distro>=0.50b0",
     "opentelemetry-instrumentation-fastapi>=0.50b0",
     "opentelemetry-instrumentation-logging>=0.50b0",
-    "opentelemetry-exporter-otlp>=1.29.0"
+    "opentelemetry-exporter-otlp>=1.29.0",
+    "imagehash>=4.3.2",
 ]
 
 [build-system]
 requires = ["uv_build>=0.10.8,<0.11.0"]
 build-backend = "uv_build"
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
