@@ -32,6 +32,7 @@ from ._constants import (
     mask_value,
 )
 from ._discovery import (
+    build_env_specific_local_file,
     build_layered_env_files,
     build_sensitive_env_file,
     build_toml_config_files,
@@ -52,5 +53,6 @@ __all__ = [
     "build_toml_config_files",
     "build_yaml_config_files",
     "build_sensitive_env_file",
+    "build_env_specific_local_file",
     "build_layered_env_files",
 ]

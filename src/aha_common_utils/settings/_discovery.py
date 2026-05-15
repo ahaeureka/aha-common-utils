@@ -1,11 +1,12 @@
 """配置文件与敏感 env 文件的自动发现工具。
 
 提供：
-- ``find_project_root``        — 向上查找包含 pyproject.toml 的目录
-- ``build_toml_config_files``  — 返回可提交的 TOML 配置文件列表
-- ``build_yaml_config_files``  — 返回可提交的 YAML 配置文件列表
-- ``build_sensitive_env_file`` — 返回 .env.local（已 .gitignore）路径
-- ``build_layered_env_files``  — 向后兼容旧接口
+- ``find_project_root``              — 向上查找包含 pyproject.toml 的目录
+- ``build_toml_config_files``        — 返回可提交的 TOML 配置文件列表
+- ``build_yaml_config_files``        — 返回可提交的 YAML 配置文件列表
+- ``build_sensitive_env_file``       — 返回 .env.local（已 .gitignore）路径
+- ``build_env_specific_local_file``  — 返回 .env.<APP_ENV>.local 路径（优先级高于 .env.local）
+- ``build_layered_env_files``        — 向后兼容旧接口
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ __all__ = [
     "build_toml_config_files",
     "build_yaml_config_files",
     "build_sensitive_env_file",
+    "build_env_specific_local_file",
     "build_layered_env_files",
 ]
 
@@ -199,6 +201,43 @@ def build_sensitive_env_file(
     if env_local.is_file():
         logger.debug("[sensitive_env] 找到 .env.local: %s", env_local)
         return env_local
+    return None
+
+
+def build_env_specific_local_file(
+    base_dir: Path | None = None,
+    app_env: str | None = None,
+) -> Path | None:
+    """返回 ``.env.<APP_ENV>.local`` 的路径（若存在），否则返回 ``None``。
+
+    该文件用于存放 **环境专属** 的敏感配置值，优先级高于 ``.env.local``，
+    同样已 .gitignore，**绝不提交到版本库**。
+
+    典型使用场景：开发环境与测试环境使用不同的数据库密码时，可在
+    ``.env.development.local`` / ``.env.test.local`` 中分别覆盖，
+    而无需每次切换环境时手动修改 ``.env.local``。
+
+    Args:
+        base_dir: 查找目录，默认为项目根目录（含 pyproject.toml 的最近上级）。
+        app_env:  环境标识符；为 None 时读取 ``APP_ENV`` 环境变量（默认 development）。
+
+    Returns:
+        存在时返回绝对路径，否则返回 ``None``。
+
+    Examples:
+        >>> p = build_env_specific_local_file(app_env="test")
+        >>> p is None or p.name == ".env.test.local"
+        True
+    """
+    if base_dir is None:
+        base_dir = find_project_root()
+    if app_env is None:
+        app_env = os.environ.get("APP_ENV", "development").strip().lower()
+
+    env_specific = base_dir / f".env.{app_env}.local"
+    if env_specific.is_file():
+        logger.debug("[sensitive_env] 找到 .env.%s.local: %s", app_env, env_specific)
+        return env_specific
     return None
 
 

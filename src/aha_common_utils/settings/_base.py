@@ -2,12 +2,21 @@
 
 加载优先级（从低→高）：
   1. 代码默认值
-  2. config.yaml / config.yml    （非敏感基础配置，可提交版本库）
-  3. config.<APP_ENV>.yaml/yml   （环境专属非敏感覆盖，可提交版本库）
-  4. config.toml                  （非敏感基础配置，可提交版本库）
-  5. config.<APP_ENV>.toml        （环境专属非敏感覆盖，可提交版本库）
-  6. .env.local                   （⚠️ 仅存放敏感值，已 .gitignore）
-  7. 进程环境变量                 （最高优先级，容器/CI 注入）
+  2. config.yaml / config.yml         （非敏感基础配置，可提交版本库）
+  3. config.<APP_ENV>.yaml/yml        （环境专属非敏感覆盖，可提交版本库）
+  4. config.toml                       （非敏感基础配置，可提交版本库）
+  5. config.<APP_ENV>.toml             （环境专属非敏感覆盖，可提交版本库）
+  6. .env.local                        （⚠️ 仅存放敏感值，已 .gitignore）
+  7. .env.<APP_ENV>.local              （⚠️ 环境专属敏感值，优先级高于 .env.local，已 .gitignore）
+  8. 进程环境变量                      （最高优先级，容器/CI 注入）
+
+子类可通过 ``model_config`` 中的 ``config_dir`` 键固定配置文件发现目录，
+适合 monorepo 场景（子包的 pyproject.toml 位于非 workspace 根目录时）：
+
+    model_config = SettingsConfigDict(
+        env_prefix="MYAPP_",
+        config_dir="/path/to/workspace/root",   # 固定发现目录
+    )
 """
 
 from __future__ import annotations
@@ -27,7 +36,12 @@ from pydantic_settings import (
 )
 
 from ._constants import INSECURE_DEFAULT_VALUES, is_sensitive_field, mask_value
-from ._discovery import build_sensitive_env_file, build_toml_config_files, build_yaml_config_files
+from ._discovery import (
+    build_env_specific_local_file,
+    build_sensitive_env_file,
+    build_toml_config_files,
+    build_yaml_config_files,
+)
 
 __all__ = ["SecureBaseSettings"]
 
@@ -89,21 +103,40 @@ class SecureBaseSettings(BaseSettings):
 
         优先级（tuple 中靠前 = 优先级更高）：
           init_settings
-          > env_settings          （进程环境变量，容器/CI 注入敏感值）
-          > dotenv_local          （.env.local，个人本地敏感值，已 .gitignore）
-          > toml_env              （config.<APP_ENV>.toml，环境专属非敏感覆盖）
-          > toml_base             （config.toml，基础非敏感默认值）
-          > yaml_env              （config.<APP_ENV>.yaml/yml，环境专属非敏感覆盖）
-          > yaml_base             （config.yaml/yml，基础非敏感默认值）
+          > env_settings              （进程环境变量，容器/CI 注入敏感值）
+          > dotenv_env_specific_local （.env.<APP_ENV>.local，环境专属敏感值，已 .gitignore）
+          > dotenv_local              （.env.local，通用本地敏感值，已 .gitignore）
+          > toml_env                  （config.<APP_ENV>.toml，环境专属非敏感覆盖）
+          > toml_base                 （config.toml，基础非敏感默认值）
+          > yaml_env                  （config.<APP_ENV>.yaml/yml，环境专属非敏感覆盖）
+          > yaml_base                 （config.yaml/yml，基础非敏感默认值）
           > file_secret_settings
+
+        子类可在 ``model_config`` 中设置 ``config_dir`` 固定文件发现目录，
+        适用于 monorepo 场景（子包 pyproject.toml 不在 workspace 根目录时）。
         """
         model_cfg = settings_cls.model_config
         enc = model_cfg.get("env_file_encoding", "utf-8")
 
+        # ── 解析文件发现基准目录 ────────────────────────────────────────────
+        config_dir_str: str | None = model_cfg.get("config_dir")  # type: ignore[call-overload]
+        base_dir: Path | None = Path(config_dir_str) if config_dir_str else None
+
         sources: list[PydanticBaseSettingsSource] = [init_settings, env_settings]
 
-        # ── .env.local（仅敏感值，已 .gitignore） ──────────────────────────
-        env_local = build_sensitive_env_file()
+        # ── .env.<APP_ENV>.local（环境专属敏感值，优先级高于 .env.local） ──
+        env_specific_local = build_env_specific_local_file(base_dir=base_dir)
+        if env_specific_local:
+            sources.append(
+                DotEnvSettingsSource(
+                    settings_cls,
+                    env_file=str(env_specific_local),
+                    env_file_encoding=enc,
+                )
+            )
+
+        # ── .env.local（通用本地敏感值，已 .gitignore） ────────────────────
+        env_local = build_sensitive_env_file(base_dir=base_dir)
         if env_local:
             sources.append(
                 DotEnvSettingsSource(
@@ -122,7 +155,7 @@ class SecureBaseSettings(BaseSettings):
                 sources.append(TomlConfigSettingsSource(settings_cls, toml_file=toml_path))
         else:
             # 按优先级从高→低追加：先 config.<APP_ENV>.toml，再 config.toml
-            for toml_path in reversed(build_toml_config_files()):
+            for toml_path in reversed(build_toml_config_files(base_dir=base_dir)):
                 sources.append(
                     TomlConfigSettingsSource(settings_cls, toml_file=toml_path)
                 )
@@ -136,7 +169,7 @@ class SecureBaseSettings(BaseSettings):
                 sources.append(YamlConfigSettingsSource(settings_cls, yaml_file=yaml_path))
         else:
             # 按优先级从高→低追加：先 config.<APP_ENV>.yaml，再 config.yaml
-            for yaml_path in reversed(build_yaml_config_files()):
+            for yaml_path in reversed(build_yaml_config_files(base_dir=base_dir)):
                 sources.append(
                     YamlConfigSettingsSource(settings_cls, yaml_file=yaml_path)
                 )
