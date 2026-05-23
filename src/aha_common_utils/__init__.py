@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .cli import Arg, CliApp, EnvOpt, FlagOpt, Opt, Router, SecretOpt
     from .config_loader import ConfigLoader, load_config
     from .config_registry import (
         get_config_class,
@@ -71,6 +72,14 @@ __all__ = [
     # 日志相关
     "setup_logging",
     "get_logger",
+    # CLI 框架
+    "CliApp",
+    "Router",
+    "Opt",
+    "Arg",
+    "EnvOpt",
+    "SecretOpt",
+    "FlagOpt",
 ]
 
 
@@ -148,11 +157,25 @@ def __getattr__(name: str) -> Any:
             build_sensitive_env_file,
             build_toml_config_files,
         )
+
         return {
             "SecureBaseSettings": SecureBaseSettings,
             "build_layered_env_files": build_layered_env_files,
             "build_toml_config_files": build_toml_config_files,
             "build_sensitive_env_file": build_sensitive_env_file,
+        }[name]
+
+    if name in {"CliApp", "Router", "Opt", "Arg", "EnvOpt", "SecretOpt", "FlagOpt"}:
+        from .cli import Arg, CliApp, EnvOpt, FlagOpt, Opt, Router, SecretOpt
+
+        return {
+            "CliApp": CliApp,
+            "Router": Router,
+            "Opt": Opt,
+            "Arg": Arg,
+            "EnvOpt": EnvOpt,
+            "SecretOpt": SecretOpt,
+            "FlagOpt": FlagOpt,
         }[name]
 
     raise AttributeError(f"module '' has no attribute '{name}'")

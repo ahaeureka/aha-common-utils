@@ -27,7 +27,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.50b0",
     "opentelemetry-instrumentation-logging>=0.50b0",
     "opentelemetry-exporter-otlp>=1.29.0",
-    "imagehash>=4.3.2",
+    "imagehash>=4.3.2"
 ]
 
 [build-system]

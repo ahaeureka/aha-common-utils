@@ -74,7 +74,7 @@ class SecureBaseSettings(BaseSettings):
         ...     LLM_API_KEY: str = ""
 
         >>> settings = AppSettings()
-        >>> print(settings)   # SECRET_KEY 和 LLM_API_KEY 会被屏蔽
+        >>> print(settings)  # SECRET_KEY 和 LLM_API_KEY 会被屏蔽
     """
 
     # 子类可追加需要屏蔽的额外字段名（精确匹配，忽略大小写）
@@ -156,9 +156,7 @@ class SecureBaseSettings(BaseSettings):
         else:
             # 按优先级从高→低追加：先 config.<APP_ENV>.toml，再 config.toml
             for toml_path in reversed(build_toml_config_files(base_dir=base_dir)):
-                sources.append(
-                    TomlConfigSettingsSource(settings_cls, toml_file=toml_path)
-                )
+                sources.append(TomlConfigSettingsSource(settings_cls, toml_file=toml_path))
 
         # ── YAML 配置文件（非敏感，可提交版本库） ──────────────────────────
         # 子类可在 model_config 中手动指定 yaml_file 跳过自动探测
@@ -170,9 +168,7 @@ class SecureBaseSettings(BaseSettings):
         else:
             # 按优先级从高→低追加：先 config.<APP_ENV>.yaml，再 config.yaml
             for yaml_path in reversed(build_yaml_config_files(base_dir=base_dir)):
-                sources.append(
-                    YamlConfigSettingsSource(settings_cls, yaml_file=yaml_path)
-                )
+                sources.append(YamlConfigSettingsSource(settings_cls, yaml_file=yaml_path))
 
         sources.append(file_secret_settings)
         return tuple(sources)
@@ -192,7 +188,7 @@ class SecureBaseSettings(BaseSettings):
         if app_env != "production":
             return self
 
-        for field_name in self.model_fields:  # pylint: disable=not-an-iterable
+        for field_name in type(self).model_fields:  # pylint: disable=not-an-iterable
             if not self._field_is_sensitive(field_name):
                 continue
             value = getattr(self, field_name, None)
@@ -209,14 +205,12 @@ class SecureBaseSettings(BaseSettings):
 
     def _field_is_sensitive(self, field_name: str) -> bool:
         """判断指定字段是否为敏感字段（综合名称模式 + 子类追加列表）。"""
-        return is_sensitive_field(field_name) or field_name.lower() in {
-            f.lower() for f in self._EXTRA_SENSITIVE_FIELDS
-        }
+        return is_sensitive_field(field_name) or field_name.lower() in {f.lower() for f in self._EXTRA_SENSITIVE_FIELDS}
 
     def __repr__(self) -> str:
         """屏蔽敏感字段的安全 repr，防止密钥意外出现在日志中。"""
         parts: list[str] = []
-        for field_name in self.model_fields:  # pylint: disable=not-an-iterable
+        for field_name in type(self).model_fields:  # pylint: disable=not-an-iterable
             value = getattr(self, field_name, None)
             if self._field_is_sensitive(field_name) and value:
                 parts.append(f"{field_name}={mask_value(value)}")
@@ -238,7 +232,7 @@ class SecureBaseSettings(BaseSettings):
             {'APP_ENV': 'development', 'DATABASE_URL': 'post****', ...}
         """
         result: dict[str, Any] = {}
-        for field_name in self.model_fields:  # pylint: disable=not-an-iterable
+        for field_name in type(self).model_fields:  # pylint: disable=not-an-iterable
             value = getattr(self, field_name, None)
             if self._field_is_sensitive(field_name) and value:
                 result[field_name] = mask_value(value)

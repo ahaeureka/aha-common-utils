@@ -22,6 +22,7 @@
 - [工具函数 API](#工具函数-api)
 - [配置文件示例](#配置文件示例)
 - [常见问题](#常见问题)
+- [CLI 框架](#cli-框架)
 
 ---
 
@@ -591,6 +592,261 @@ files = build_toml_config_files(base_dir=Path("/custom/path"))
 ### Q: pydantic-settings 版本要求？
 
 需要 `pydantic-settings >= 2.7.0`，因为 `YamlConfigSettingsSource` 是在该版本引入的。项目 `pyproject.toml` 中已声明此依赖。
+
+---
+
+## CLI 框架
+
+`aha_common_utils.cli` 提供类 FastAPI 风格的声明式 CLI 框架，基于 [typer](https://typer.tiangolo.com/) 封装。
+
+核心特性：
+
+- **`Annotated` 参数注解** — 用 `Annotated[T, Opt(...)]` 语法声明选项和位置参数，与 FastAPI 参数风格一致
+- **五种参数助手** — `Opt`、`Arg`、`EnvOpt`、`SecretOpt`、`FlagOpt`，覆盖常见场景
+- **两级子命令** — `CliApp → Router → command`，对应 FastAPI 的 `FastAPI + APIRouter`
+- **`async def` 自动包装** — 命令函数可以是 `async def`，框架自动用 `asyncio.run` 包装
+
+### 快速上手
+
+```python
+from typing import Annotated
+from aha_common_utils.cli import CliApp, Router, Opt, Arg, EnvOpt, SecretOpt, FlagOpt
+
+app = CliApp(name="myapp", help="示例应用", no_args_is_help=True)
+
+# ── 子命令组（对应 FastAPI 的 APIRouter） ─────────────────
+db = Router(name="db", help="数据库命令")
+
+@db.command("upgrade")
+async def db_upgrade(
+    url: Annotated[str, EnvOpt("DATABASE_URL", help="DB 连接 URL")],
+    dry_run: Annotated[bool, FlagOpt(help="仅预览变更", short="-n")] = False,
+):
+    """升级数据库 schema。"""
+    result = await do_migration(url, dry_run=dry_run)
+    ...
+
+@db.command("init")
+def db_init(
+    password: Annotated[str, SecretOpt(help="DB 密码", envvar="DB_PASSWORD")],
+):
+    """初始化数据库。"""
+    ...
+
+app.include_router(db)   # 挂载子命令组
+
+# ── 顶层命令 ──────────────────────────────────────────────
+@app.command("serve")
+def serve(
+    host: Annotated[str, Opt(help="绑定地址", envvar="HOST")] = "0.0.0.0",
+    port: Annotated[int, Opt(help="端口号", short="-p")] = 8080,
+    verbose: Annotated[bool, FlagOpt(help="详细输出", short="-v")] = False,
+    name: Annotated[str, Arg(help="服务名称")],
+):
+    """启动服务。"""
+    ...
+
+if __name__ == "__main__":
+    app.run()
+```
+
+产生的 CLI 命令：
+
+```
+myapp serve NAME [--host TEXT] [-p INT] [--verbose / --no-verbose] [-v]
+myapp db upgrade [--url / $DATABASE_URL] [--dry-run / -n]
+myapp db init                    # 交互式密码输入 或 $DB_PASSWORD
+```
+
+---
+
+### 参数助手 API
+
+所有助手函数直接返回 typer 的 `OptionInfo` / `ArgumentInfo`，可用于 `Annotated[T, XxxOpt(...)]`。
+
+#### `Opt` — 通用选项
+
+```python
+from aha_common_utils.cli import Opt
+
+host: Annotated[str, Opt(
+    help="绑定地址",
+    envvar="HOST",       # 从环境变量读取
+    short="-H",          # 短选项
+    show_default=True,
+    hidden=False,
+)] = "0.0.0.0"
+```
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `help` | `str` | 帮助文本 |
+| `envvar` | `str \| list[str] \| None` | 绑定的环境变量名 |
+| `short` | `str \| None` | 短选项，如 `"-p"`、`"-H"` |
+| `show_default` | `bool` | 是否在 help 中展示默认值 |
+| `hidden` | `bool` | 是否在 --help 中隐藏 |
+| `prompt` | `bool \| str` | 是否交互提示输入 |
+| `metavar` | `str \| None` | usage 行中的值占位符 |
+
+#### `Arg` — 位置参数
+
+```python
+from aha_common_utils.cli import Arg
+
+name: Annotated[str, Arg(help="服务名称")]
+```
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `help` | `str` | 帮助文本 |
+| `metavar` | `str \| None` | usage 行中的占位符 |
+| `show_default` | `bool` | 是否展示默认值 |
+| `hidden` | `bool` | 是否在 --help 中隐藏 |
+
+#### `EnvOpt` — 环境变量绑定选项
+
+第一个位置参数为环境变量名，语义比 `Opt(envvar=...)` 更清晰。
+
+```python
+from aha_common_utils.cli import EnvOpt
+
+url: Annotated[str, EnvOpt("DATABASE_URL", help="数据库连接 URL")]
+api_key: Annotated[str, EnvOpt("LLM_API_KEY", help="LLM API Key", short="-k")] = ""
+```
+
+#### `SecretOpt` — 密码/密钥选项
+
+自动启用 `hide_input=True`。若设置了 `envvar`，环境变量有值时跳过交互提示；无值时进入交互输入（输入内容不显示）。
+
+```python
+from aha_common_utils.cli import SecretOpt
+
+password: Annotated[str, SecretOpt(
+    help="数据库密码",
+    envvar="DB_PASSWORD",       # 有环境变量时不提示
+    confirmation_prompt=True,  # 要求二次确认
+)]
+```
+
+#### `FlagOpt` — 布尔开关
+
+专为 `bool` 类型设计，typer 自动生成 `--flag / --no-flag` 对。提供 `short` 时追加为短选项（对应正向值）。
+
+```python
+from aha_common_utils.cli import FlagOpt
+
+verbose: Annotated[bool, FlagOpt(help="详细输出", short="-v")] = False
+dry_run: Annotated[bool, FlagOpt(help="仅预览", short="-n")] = False
+```
+
+---
+
+### `CliApp` API
+
+```python
+from aha_common_utils.cli import CliApp
+
+app = CliApp(
+    name="myapp",           # CLI 程序名，显示在 Usage 行
+    help="My application",  # 顶层帮助文本
+    no_args_is_help=True,   # 无参数时打印 help（默认 True）
+    add_completion=True,    # 添加 shell 补全命令（默认 True）
+)
+```
+
+| 方法 | 说明 |
+|---|---|
+| `.command(name, *, help, deprecated, hidden)` | 注册顶层命令，支持 `async def` |
+| `.include_router(router, *, prefix, help, deprecated)` | 挂载子命令组 |
+| `.callback(*, invoke_without_command, no_args_is_help)` | 注册顶层全局选项（如 `--version`） |
+| `.run(args=None)` | 启动 CLI；`args=None` 时读取 `sys.argv`，测试时可显式传参 |
+
+**添加全局 `--version` 标志示例：**
+
+```python
+import typer
+
+@app.callback()
+def main(version: Annotated[bool, FlagOpt(help="显示版本号")] = False):
+    if version:
+        typer.echo("1.0.0")
+        raise typer.Exit()
+```
+
+---
+
+### `Router` API
+
+```python
+from aha_common_utils.cli import Router
+
+db = Router(
+    name="db",            # 子命令组名称，用作 CLI 前缀
+    help="数据库命令",     # 显示在顶层 --help 的子命令列表中
+    no_args_is_help=True, # 默认 True
+)
+```
+
+| 方法 | 说明 |
+|---|---|
+| `.command(name, *, help, deprecated, hidden)` | 注册子命令，支持 `async def` |
+| `.callback(*, invoke_without_command, no_args_is_help)` | 组级共享选项（任意子命令执行前调用） |
+
+**组级共享选项示例（为整组命令添加 `--verbose`）：**
+
+```python
+@db.callback()
+def db_common(
+    verbose: Annotated[bool, FlagOpt(help="详细输出", short="-v")] = False,
+):
+    if verbose:
+        typer.echo("Verbose mode enabled")
+```
+
+---
+
+### async def 支持
+
+`@app.command()` 和 `@router.command()` 内部会自动检测函数是否为协程函数（`async def`）。若是，则用 `asyncio.run` 包装为同步函数后注册到 typer。
+
+**规则：**
+
+- 使用 `async def` 定义命令函数 → 框架自动包装，无需手动调用 `asyncio.run`
+- 使用 `def` 定义命令函数 → 直接注册，无额外开销
+- 两种方式可以在同一个 `CliApp` 或 `Router` 中混用
+
+```python
+@app.command("async-cmd")
+async def async_command(name: Annotated[str, Arg(help="名称")]):
+    result = await some_async_operation(name)   # 直接 await
+    typer.echo(result)
+
+@app.command("sync-cmd")
+def sync_command(name: Annotated[str, Arg(help="名称")]):
+    result = some_sync_operation(name)
+    typer.echo(result)
+```
+
+---
+
+### 测试 CLI 命令
+
+使用 `app.run(args=[...])` 显式传入参数列表，配合 [typer.testing.CliRunner](https://typer.tiangolo.com/tutorial/testing/) 进行单元测试：
+
+```python
+from typer.testing import CliRunner
+
+runner = CliRunner()
+
+def test_serve():
+    result = runner.invoke(app._typer, ["serve", "myapp", "--port", "9000"])
+    assert result.exit_code == 0
+    assert "myapp" in result.output
+
+def test_db_upgrade_dry_run():
+    result = runner.invoke(app._typer, ["db", "upgrade", "--dry-run"])
+    assert result.exit_code == 0
+```
 
 ---
 
