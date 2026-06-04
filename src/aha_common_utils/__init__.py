@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         get_registry,
         register_config,
     )
+    from .config_store import ConfigStore
     from .logging import get_logger, setup_logging
     from .path_utils import find_env_files_recursive, find_project_root
     from .register import ProviderRegistry, register_provider, register_provider_group
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 __all__ = [
     # 配置系统
     "ConfigLoader",
+    "ConfigStore",
     "load_config",
     "register_config",
     "get_registry",
@@ -103,6 +105,11 @@ def __getattr__(name: str) -> Any:
         from .config_loader import ConfigLoader, load_config
 
         return {"ConfigLoader": ConfigLoader, "load_config": load_config}[name]
+
+    if name in {"ConfigStore"}:
+        from .config_store import ConfigStore
+
+        return {"ConfigStore": ConfigStore}[name]
 
     if name in {"register_config", "get_registry", "get_config_class", "get_main_config_class"}:
         from .config_registry import get_config_class, get_main_config_class, get_registry, register_config
