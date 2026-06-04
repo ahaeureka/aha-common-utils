@@ -25,13 +25,6 @@ from typing import Any
 from .config_base import BaseParameters
 from .config_file_parser import load_env_file
 from .logging import get_logger
-from .settings._discovery import (
-    build_env_specific_local_file,
-    build_sensitive_env_file,
-    build_toml_config_files,
-    build_yaml_config_files,
-    find_project_root,
-)
 
 logger = get_logger(__name__)
 
@@ -159,6 +152,109 @@ def _coerce_value(env_value: str, existing_value: Any) -> Any:
 
 
 # ============================================================================
+# File discovery helpers (moved from settings._discovery)
+# ============================================================================
+
+
+def _find_project_root(start: Path | None = None) -> Path:
+    """Walk up from *start* (default cwd) to nearest dir containing ``pyproject.toml``."""
+    current = (start or Path.cwd()).resolve()
+    while current != current.parent:
+        if (current / "pyproject.toml").exists():
+            return current
+        current = current.parent
+    return (start or Path.cwd()).resolve()
+
+
+def _build_toml_config_files(
+    base_dir: Path | None = None,
+    app_env: str | None = None,
+) -> list[Path]:
+    """Return existing TOML config files: [config.toml, config.<env>.toml]."""
+    if base_dir is None:
+        base_dir = _find_project_root()
+    if app_env is None:
+        app_env = os.environ.get("APP_ENV", "development").strip().lower()
+
+    candidates: list[Path] = [
+        base_dir / "config.toml",
+        base_dir / f"config.{app_env}.toml",
+    ]
+    existing = [p for p in candidates if p.is_file()]
+
+    if existing:
+        logger.debug(
+            "[toml_config] APP_ENV=%r, loading TOML files (low->high): %s",
+            app_env,
+            [p.name for p in existing],
+        )
+    else:
+        logger.debug("[toml_config] APP_ENV=%r, no config.toml found in %s", app_env, base_dir)
+    return existing
+
+
+def _build_yaml_config_files(
+    base_dir: Path | None = None,
+    app_env: str | None = None,
+) -> list[Path]:
+    """Return existing YAML config files: [config.yaml, config.<env>.yaml]."""
+    if base_dir is None:
+        base_dir = _find_project_root()
+    if app_env is None:
+        app_env = os.environ.get("APP_ENV", "development").strip().lower()
+
+    existing: list[Path] = []
+    for p in [base_dir / "config.yaml", base_dir / "config.yml"]:
+        if p.is_file():
+            existing.append(p)
+            break
+    for p in [base_dir / f"config.{app_env}.yaml", base_dir / f"config.{app_env}.yml"]:
+        if p.is_file():
+            existing.append(p)
+            break
+
+    if existing:
+        logger.debug(
+            "[yaml_config] APP_ENV=%r, loading YAML files (low->high): %s",
+            app_env,
+            [p.name for p in existing],
+        )
+    else:
+        logger.debug("[yaml_config] APP_ENV=%r, no config.yaml/yml found in %s", app_env, base_dir)
+    return existing
+
+
+def _build_sensitive_env_file(
+    base_dir: Path | None = None,
+) -> Path | None:
+    """Return path to ``.env.local`` if it exists, otherwise ``None``."""
+    if base_dir is None:
+        base_dir = _find_project_root()
+    env_local = base_dir / ".env.local"
+    if env_local.is_file():
+        logger.debug("[sensitive_env] found .env.local: %s", env_local)
+        return env_local
+    return None
+
+
+def _build_env_specific_local_file(
+    base_dir: Path | None = None,
+    app_env: str | None = None,
+) -> Path | None:
+    """Return path to ``.env.<APP_ENV>.local`` if it exists, otherwise ``None``."""
+    if base_dir is None:
+        base_dir = _find_project_root()
+    if app_env is None:
+        app_env = os.environ.get("APP_ENV", "development").strip().lower()
+
+    env_specific = base_dir / f".env.{app_env}.local"
+    if env_specific.is_file():
+        logger.debug("[sensitive_env] found .env.%s.local: %s", app_env, env_specific)
+        return env_specific
+    return None
+
+
+# ============================================================================
 # ConfigStore
 # ============================================================================
 
@@ -238,7 +334,7 @@ class ConfigStore:
             An instance of *config_class* populated from all sources.
         """
         if base_dir is None:
-            base_dir = find_project_root()
+            base_dir = _find_project_root()
         if app_env is None:
             app_env = os.environ.get("APP_ENV", "development").strip().lower()
 
@@ -352,13 +448,13 @@ class ConfigStore:
         self, base_dir: Path, app_env: str
     ) -> list[Path]:
         """Discover YAML config files: [config.yaml, config.<env>.yaml]."""
-        return build_yaml_config_files(base_dir=base_dir, app_env=app_env)
+        return _build_yaml_config_files(base_dir=base_dir, app_env=app_env)
 
     def _discover_toml_files(
         self, base_dir: Path, app_env: str
     ) -> list[Path]:
         """Discover TOML config files: [config.toml, config.<env>.toml]."""
-        return build_toml_config_files(base_dir=base_dir, app_env=app_env)
+        return _build_toml_config_files(base_dir=base_dir, app_env=app_env)
 
     # ── Internal: file parsing ────────────────────────────────────────────
 
@@ -408,13 +504,13 @@ class ConfigStore:
             app_env: Environment identifier (e.g. ``"development"``).
         """
         # .env.local (lower priority)
-        env_local = build_sensitive_env_file(base_dir=base_dir)
+        env_local = _build_sensitive_env_file(base_dir=base_dir)
         if env_local is not None:
             load_env_file(env_local, override=False)
             logger.debug("[ConfigStore] loaded env file: %s", env_local.name)
 
         # .env.<ENV>.local (higher priority)
-        env_specific = build_env_specific_local_file(base_dir=base_dir, app_env=app_env)
+        env_specific = _build_env_specific_local_file(base_dir=base_dir, app_env=app_env)
         if env_specific is not None:
             load_env_file(env_specific, override=False)
             logger.debug("[ConfigStore] loaded env file: %s", env_specific.name)

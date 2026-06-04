@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .cli import Arg, CliApp, EnvOpt, FlagOpt, Opt, Router, SecretOpt
+    from .config_base import BaseParameters
     from .config_loader import ConfigLoader, load_config
     from .config_registry import (
         get_config_class,
@@ -21,14 +22,6 @@ if TYPE_CHECKING:
     from .path_utils import find_env_files_recursive, find_project_root
     from .register import ProviderRegistry, register_provider, register_provider_group
     from .settings import (
-        AppConfig,
-        SecureBaseSettings,
-        build_env_specific_local_file,
-        build_json_config_files,
-        build_layered_env_files,
-        build_sensitive_env_file,
-        build_toml_config_files,
-        build_yaml_config_files,
         merge_configs,
         read_config,
         write_config,
@@ -47,6 +40,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     # 配置系统
+    "BaseParameters",
     "ConfigLoader",
     "ConfigStore",
     "load_config",
@@ -54,16 +48,7 @@ __all__ = [
     "get_registry",
     "get_config_class",
     "get_main_config_class",
-    # 安全分层配置
-    "SecureBaseSettings",
-    "build_toml_config_files",
-    "build_yaml_config_files",
-    "build_json_config_files",
-    "build_sensitive_env_file",
-    "build_env_specific_local_file",
-    "build_layered_env_files",  # 向后兼容
-    # 统一配置入口
-    "AppConfig",
+    # 统一配置读写 API
     "read_config",
     "write_config",
     "merge_configs",
@@ -101,6 +86,11 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
+    if name in {"BaseParameters"}:
+        from .config_base import BaseParameters
+
+        return {"BaseParameters": BaseParameters}[name]
+
     if name in {"ConfigLoader", "load_config"}:
         from .config_loader import ConfigLoader, load_config
 
@@ -172,42 +162,10 @@ def __getattr__(name: str) -> Any:
 
         return {"setup_tracing": setup_tracing, "get_tracer": get_tracer}[name]
 
-    if name in {
-        "SecureBaseSettings",
-        "build_layered_env_files",
-        "build_toml_config_files",
-        "build_yaml_config_files",
-        "build_json_config_files",
-        "build_sensitive_env_file",
-        "build_env_specific_local_file",
-        "AppConfig",
-        "read_config",
-        "write_config",
-        "merge_configs",
-    }:
-        from .settings import (
-            AppConfig,
-            SecureBaseSettings,
-            build_env_specific_local_file,
-            build_json_config_files,
-            build_layered_env_files,
-            build_sensitive_env_file,
-            build_toml_config_files,
-            build_yaml_config_files,
-            merge_configs,
-            read_config,
-            write_config,
-        )
+    if name in {"read_config", "write_config", "merge_configs"}:
+        from .settings import merge_configs, read_config, write_config
 
         return {
-            "SecureBaseSettings": SecureBaseSettings,
-            "build_layered_env_files": build_layered_env_files,
-            "build_toml_config_files": build_toml_config_files,
-            "build_yaml_config_files": build_yaml_config_files,
-            "build_json_config_files": build_json_config_files,
-            "build_sensitive_env_file": build_sensitive_env_file,
-            "build_env_specific_local_file": build_env_specific_local_file,
-            "AppConfig": AppConfig,
             "read_config": read_config,
             "write_config": write_config,
             "merge_configs": merge_configs,

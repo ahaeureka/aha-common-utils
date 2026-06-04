@@ -5,7 +5,7 @@
 - 递归查找 .env 文件
 
 .. deprecated::
-    请改用 ``aha_common_utils.settings._discovery`` 中的函数。
+    请改用 ``aha_common_utils.config_store.ConfigStore`` 进行配置发现。
 """
 
 import warnings
@@ -15,7 +15,7 @@ from pathlib import Path
 def find_project_root(start_path: Path | None = None) -> Path:
     """（已废弃）查找项目根目录。
 
-    请改用 ``aha_common_utils.settings._discovery.find_project_root()``。
+    请改用 ``aha_common_utils.config_store.ConfigStore``。
 
     Args:
         start_path: 开始搜索的路径，默认为当前工作目录
@@ -24,22 +24,26 @@ def find_project_root(start_path: Path | None = None) -> Path:
         项目根目录路径
     """
     warnings.warn(
-        "find_project_root() is deprecated. Use aha_common_utils.settings._discovery.find_project_root() instead.",
+        "find_project_root() is deprecated. "
+        "Use aha_common_utils.config_store.ConfigStore instead.",
         DeprecationWarning,
         stacklevel=2,
     )
-    from aha_common_utils.settings._discovery import find_project_root as _fpr
-
-    return _fpr(start=start_path)
+    current = (start_path or Path.cwd()).resolve()
+    while current != current.parent:
+        if (current / "pyproject.toml").exists():
+            return current
+        current = current.parent
+    return (start_path or Path.cwd()).resolve()
 
 
 def find_env_files_recursive(
-    start_path: Path | None = None,
-    env_filename: str = ".env",
+    start_path: Path | None = None,  # noqa: ARG001
+    env_filename: str = ".env",  # noqa: ARG001
 ) -> list[Path]:
     """（已废弃）递归查找 .env 文件。
 
-    请改用 ``aha_common_utils.settings._discovery.build_sensitive_env_file()``。
+    请改用 ``aha_common_utils.config_store.ConfigStore``。
 
     Args:
         start_path: 当前工作目录，默认为 cwd
@@ -50,14 +54,13 @@ def find_env_files_recursive(
     """
     warnings.warn(
         "find_env_files_recursive() is deprecated. "
-        "Use aha_common_utils.settings._discovery.build_sensitive_env_file() instead.",
+        "Use aha_common_utils.config_store.ConfigStore instead.",
         DeprecationWarning,
         stacklevel=2,
     )
-    from aha_common_utils.settings._discovery import build_sensitive_env_file
-
-    result = build_sensitive_env_file()
-    return [result] if result else []
+    root = find_project_root(start_path)
+    env_local = root / ".env.local"
+    return [env_local] if env_local.is_file() else []
 
 
 __all__ = [

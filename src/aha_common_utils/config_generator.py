@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 def _find_env_files() -> List[Path]:
     """（已废弃）递归查找所有 .env 文件。
 
-    请改用 ``aha_common_utils.settings._discovery.build_sensitive_env_file()``。
+    请改用 ``aha_common_utils.config_store.ConfigStore``。
 
     Returns:
         .env 文件路径列表，从外层到内层排序
@@ -28,14 +28,21 @@ def _find_env_files() -> List[Path]:
     import warnings
 
     warnings.warn(
-        "_find_env_files() is deprecated. Use aha_common_utils.settings._discovery.build_sensitive_env_file() instead.",
+        "_find_env_files() is deprecated. "
+        "Use aha_common_utils.config_store.ConfigStore instead.",
         DeprecationWarning,
         stacklevel=2,
     )
-    from aha_common_utils.settings._discovery import build_sensitive_env_file
-
-    result = build_sensitive_env_file()
-    return [result] if result else []
+    # Walk up from cwd to find .env.local
+    current = Path.cwd().resolve()
+    env_local: Path | None = None
+    while current != current.parent:
+        candidate = current / ".env.local"
+        if candidate.is_file():
+            env_local = candidate
+            break
+        current = current.parent
+    return [env_local] if env_local else []
 
 
 class ParamScanner:
