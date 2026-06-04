@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-from inspect import isclass
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
@@ -256,15 +255,20 @@ class BaseParameters(BaseModel):
 
     # ── Update / merge ───────────────────────────────────────────────
 
-    def update_from(self, source: BaseParameters | dict[str, Any]) -> None:
+    def update_from(self, source: BaseParameters | dict[str, Any]) -> bool:
         """Merge values from another instance or dict.
 
         Fields marked as ``fixed`` (via ``json_schema_extra``) are
-        skipped and retain their current values.
+        skipped and retain their current values.  ``None`` values in
+        the source are also skipped to avoid overwriting required
+        fields.
 
         Args:
             source: Another ``BaseParameters`` instance or a plain
                 ``dict`` of field values.
+
+        Returns:
+            ``True`` if at least one field was updated.
 
         Raises:
             TypeError: If *source* is neither ``BaseParameters`` nor
@@ -279,11 +283,16 @@ class BaseParameters(BaseModel):
                 f"source must be BaseParameters or dict, got {type(source).__name__}"
             )
 
+        updated = False
         for field_name, field_info in self.model_fields.items():
             if _field_is_fixed(field_info):
                 continue
             if field_name in source_data:
-                setattr(self, field_name, source_data[field_name])
+                new_value = source_data[field_name]
+                if new_value is not None and new_value != getattr(self, field_name):
+                    setattr(self, field_name, new_value)
+                    updated = True
+        return updated
 
     # ── Sensitive-field detection ────────────────────────────────────
 
