@@ -18,51 +18,24 @@ logger = get_logger(__name__)
 
 
 def _find_env_files() -> List[Path]:
-    """递归查找所有 .env 文件，从当前目录向上直到根目录的 pyproject.toml
+    """（已废弃）递归查找所有 .env 文件。
 
-    优先级：内层 > 外层
-    返回的列表按照 Pydantic 加载顺序排列（先加载的优先级低）
+    请改用 ``aha_common_utils.settings._discovery.build_sensitive_env_file()``。
 
     Returns:
         .env 文件路径列表，从外层到内层排序
     """
-    env_files = []
-    current = Path.cwd().resolve()
-    root_pyproject = None
+    import warnings
 
-    # 第一遍：向上查找，记录所有 .env 和 pyproject.toml
-    visited = []
-    while True:
-        env_file = current / ".env"
-        if env_file.exists():
-            visited.append(("env", current, env_file))
+    warnings.warn(
+        "_find_env_files() is deprecated. Use aha_common_utils.settings._discovery.build_sensitive_env_file() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from aha_common_utils.settings._discovery import build_sensitive_env_file
 
-        pyproject = current / "pyproject.toml"
-        if pyproject.exists():
-            visited.append(("pyproject", current, pyproject))
-            root_pyproject = current
-
-        # 检查是否到达文件系统根目录
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-
-    # 第二遍：从最外层的 pyproject.toml 向下收集 .env
-    if root_pyproject:
-        for item_type, path, file in reversed(visited):
-            if item_type == "env" and path >= root_pyproject:
-                env_files.append(file)
-    else:
-        # 如果没找到 pyproject.toml，收集所有 .env
-        for item_type, path, file in reversed(visited):
-            if item_type == "env":
-                env_files.append(file)
-
-    if env_files:
-        logger.debug(f"[ConfigGenerator] Found .env files (outer→inner): {[str(f) for f in env_files]}")
-
-    return env_files
+    result = build_sensitive_env_file()
+    return [result] if result else []
 
 
 class ParamScanner:
