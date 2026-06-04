@@ -592,61 +592,94 @@ def load_config_with_env(
 # ============================================================================
 
 
-def read_config(config_file: str | Path) -> Dict[str, Any]:
+def read_config(
+    config_file: str | Path,
+    *,
+    path: str | None = None,
+) -> Dict[str, Any]:
     """统一读入口。根据扩展名自动选择解析器。
 
     Args:
         config_file: 配置文件路径（.yaml/.yml/.toml/.json/.ini/.cfg/.env）。
+        path: 可选的嵌套路径（如 "cache.diskcache"），非空时仅返回该子树的配置。
 
     Returns:
-        配置字典。
+        配置字典；若指定 path 则返回嵌套子树。
 
-    TODO(Task 2): 添加 `path` 参数支持嵌套子树提取。
+    Raises:
+        ValueError: 文件不存在或格式不支持。
     """
-    return parse_config_file(config_file)
+    if not os.path.exists(config_file):
+        raise ValueError(f"Config file not found: {config_file}")
+
+    file_path = Path(config_file)
+    suffix = file_path.suffix.lower()
+
+    if suffix in (".yaml", ".yml"):
+        data = _parse_yaml(config_file)
+    elif suffix == ".toml":
+        data = _parse_toml(config_file)
+    elif suffix == ".json":
+        data = _parse_json(config_file)
+    elif suffix in (".ini", ".cfg"):
+        data = _parse_ini(config_file)
+    elif suffix == ".env":
+        data = _parse_env_to_dict(config_file)
+    else:
+        raise ValueError(
+            f"Unsupported config file format: {suffix}. Supported: .yaml, .yml, .toml, .json, .ini, .cfg, .env"
+        )
+
+    if path:
+        return extract_nested_config(data, path)
+    return data
 
 
 def write_config(
     data: Dict[str, Any],
     config_file: str | Path,
+    *,
+    path: str | None = None,
+    style: str | None = None,
 ) -> None:
     """统一写入口。根据扩展名自动选择序列化器。
 
     Args:
         data: 要写入的配置字典。
         config_file: 目标文件路径。
-
-    TODO(Task 2): 添加 `path` 参数支持部分更新，添加 `style` 参数覆盖扩展名推断。
+        path: 可选的嵌套路径，非空时执行部分更新（read-modify-write），保留其他 section。
+        style: 可选的格式覆盖（如 "toml"），不指定时从文件扩展名推断。
     """
-    import json
-    import os as _os
-
     file_path = Path(config_file)
-    suffix = file_path.suffix.lower()
+    suffix = (style or "").lstrip(".") or file_path.suffix.lower().lstrip(".")
 
-    _os.makedirs(file_path.parent, exist_ok=True)
+    if path:
+        # 部分更新：读取 → 深度更新指定路径 → 写回
+        existing = read_config(config_file)
+        current = existing
+        parts = path.split(".")
+        for part in parts[:-1]:
+            current = current.setdefault(part, {})
+        if isinstance(current.get(parts[-1]), dict) and isinstance(data, dict):
+            current[parts[-1]] = {**current[parts[-1]], **data}
+        else:
+            current[parts[-1]] = data
+        data = existing
 
-    if suffix in (".yaml", ".yml"):
-        try:
-            import yaml
+    os.makedirs(file_path.parent, exist_ok=True)
 
-            with open(config_file, "w", encoding="utf-8") as f:
-                yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True)
-        except ImportError as exc:
-            raise ValueError("PyYAML is not installed. Install it with: pip install pyyaml") from exc
-    elif suffix == ".toml":
-        try:
-            import tomli_w
-
-            with open(config_file, "wb") as f:
-                tomli_w.dump(data, f)
-        except ImportError:
-            raise ValueError("tomli-w is not installed. Install it with: pip install tomli-w") from None
-    elif suffix == ".json":
-        with open(config_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+    if suffix in ("yaml", "yml"):
+        _write_yaml(config_file, data)
+    elif suffix == "toml":
+        _write_toml(config_file, data)
+    elif suffix == "json":
+        _write_json(config_file, data)
+    elif suffix in ("ini", "cfg"):
+        _write_ini(config_file, data)
+    elif suffix == "env":
+        _write_env_file(config_file, data)
     else:
-        raise ValueError(f"Unsupported config file format: {suffix}. Supported: .yaml, .yml, .toml, .json")
+        raise ValueError(f"Unsupported format: {suffix}. Supported: yaml, yml, toml, json, ini, cfg, env")
 
 
 def merge_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
@@ -673,23 +706,137 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
             base[key] = value
 
 
+# ============================================================================
+# 私有辅助：INI / ENV / YAML / TOML / JSON 写入
+# ============================================================================
+
+
+def _parse_ini(config_file: str | Path) -> Dict[str, Any]:
+    """解析 INI 配置文件，section 名中的 . 映射为嵌套 dict。"""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read(str(config_file), encoding="utf-8")
+    result: Dict[str, Any] = {}
+    for section in parser.sections():
+        current = result
+        parts = section.split(".")
+        for part in parts[:-1]:
+            current = current.setdefault(part, {})
+        current[parts[-1]] = dict(parser.items(section))
+    return result
+
+
+def _write_ini(config_file: str | Path, data: Dict[str, Any]) -> None:
+    """将嵌套 dict 写入 INI 文件，嵌套路径展平为 . 分隔的 section 名。"""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    _flatten_ini_sections(parser, data, "")
+    with open(config_file, "w", encoding="utf-8") as f:
+        parser.write(f)
+
+
+def _flatten_ini_sections(
+    parser: Any,
+    data: Dict[str, Any],
+    prefix: str,
+) -> None:
+    """递归展平嵌套 dict 为 INI section。"""
+    for key, value in data.items():
+        section = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict) and any(isinstance(v, dict) for v in value.values()):
+            _flatten_ini_sections(parser, value, section)
+        elif isinstance(value, dict):
+            parser[section] = {k: str(v) for k, v in value.items()}
+        else:
+            if section not in parser:
+                parser[section] = {}
+            parser[section][key] = str(value)
+
+
+def _parse_env_to_dict(config_file: str | Path) -> Dict[str, Any]:
+    """解析 .env 文件为 dict，__ 映射为嵌套路径。"""
+    result: Dict[str, Any] = {}
+    with open(config_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if "__" in key:
+                    set_nested_value(result, env_key_to_config_path(key), parse_env_value(value))
+                else:
+                    result[key] = parse_env_value(value)
+    return result
+
+
+def _write_env_file(config_file: str | Path, data: Dict[str, Any]) -> None:
+    """将扁平 dict 写入 .env 文件，嵌套 key 用 __ 分隔。"""
+    lines = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            for sub_key, sub_value in _flatten_env(value, key):
+                lines.append(f"{sub_key}={sub_value}")
+        elif isinstance(value, (list, tuple)):
+            lines.append(f"{key}={','.join(str(v) for v in value)}")
+        else:
+            lines.append(f"{key}={value}")
+    with open(config_file, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def _flatten_env(data: Dict[str, Any], prefix: str) -> list[tuple[str, str]]:
+    """将嵌套 dict 展平为 (KEY, VALUE) 列表，用 __ 分隔层级。"""
+    result = []
+    for key, value in data.items():
+        full_key = f"{prefix}__{key}"
+        if isinstance(value, dict):
+            result.extend(_flatten_env(value, full_key))
+        else:
+            result.append((full_key, str(value)))
+    return result
+
+
+def _write_yaml(config_file: str | Path, data: Dict[str, Any]) -> None:
+    import yaml
+
+    with open(config_file, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def _write_toml(config_file: str | Path, data: Dict[str, Any]) -> None:
+    try:
+        import tomli_w
+    except ImportError:
+        raise ImportError("tomli_w is required for TOML writing. Install with: pip install tomli_w")
+    with open(config_file, "wb") as f:
+        tomli_w.dump(data, f)
+
+
+def _write_json(config_file: str | Path, data: Dict[str, Any]) -> None:
+    import json as _json
+
+    with open(config_file, "w", encoding="utf-8") as f:
+        _json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 __all__ = [
-    # 配置文件解析
     "parse_config_file",
     "extract_nested_config",
     "load_config_section",
-    # 环境变量加载
+    "read_config",
+    "write_config",
+    "merge_configs",
     "load_env_file",
     "get_env_with_prefix",
     "parse_env_value",
     "env_key_to_config_path",
     "set_nested_value",
     "apply_env_to_config",
-    # Pydantic Settings
     "create_settings_class",
     "load_config_with_env",
-    # 统一读写 API
-    "read_config",
-    "write_config",
-    "merge_configs",
 ]
