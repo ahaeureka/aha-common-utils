@@ -45,23 +45,32 @@ class ConfigLoader:
         toml_file: Optional[str | Path] = None,
         yaml_file: Optional[str | Path] = None,
         json_file: Optional[str | Path] = None,
+        config_files: Optional[list[str | Path]] = None,
+        toml_files: Optional[list[str | Path]] = None,
+        yaml_files: Optional[list[str | Path]] = None,
+        json_files: Optional[list[str | Path]] = None,
         provider_modules: Optional[list[str]] = None,
     ):
         """初始化配置加载器
 
         Args:
             env_file: .env 文件路径（指定后将禁用递归查找）
-            toml_file: TOML 配置文件路径
-            yaml_file: YAML 配置文件路径
-            json_file: JSON 配置文件路径
+            toml_file: TOML 配置文件路径（单文件，等同于 toml_files=[toml_file]）
+            yaml_file: YAML 配置文件路径（单文件，等同于 yaml_files=[yaml_file]）
+            json_file: JSON 配置文件路径（单文件，等同于 json_files=[json_file]）
+            config_files: 自动按扩展名分发的配置文件列表
+            toml_files: TOML 配置文件列表（最高优先级，覆盖 toml_file）
+            yaml_files: YAML 配置文件列表（最高优先级，覆盖 yaml_file）
+            json_files: JSON 配置文件列表（最高优先级，覆盖 json_file）
             provider_modules: 需要导入的 provider 模块列表，None 则自动扫描
         """
         self.env_file = env_file
-        self.toml_file = toml_file
-        self.yaml_file = yaml_file
-        self.json_file = json_file
         self.provider_modules = provider_modules
         self._registry = get_registry()
+        self.toml_files: list[str | Path] = toml_files or ([toml_file] if toml_file else [])
+        self.yaml_files: list[str | Path] = yaml_files or ([yaml_file] if yaml_file else [])
+        self.json_files: list[str | Path] = json_files or ([json_file] if json_file else [])
+        self.config_files: list[str | Path] = config_files or []
 
     def load(
         self,
@@ -332,21 +341,40 @@ class ConfigLoader:
 
         return config_dict
 
-    def _load_file_data(self) -> Optional[Dict[str, Any]]:
-        """从配置文件加载数据
+    def _load_file_data(self) -> dict[str, Any]:
+        """从配置文件加载数据（多文件合并）。
+
+        按优先级从低到高依次加载：config_files → yaml_files → toml_files → json_files，
+        后者覆盖前者的同名键。
 
         Returns:
-            配置数据字典，如果没有配置文件返回 None
+            合并后的配置数据字典，如果没有配置文件返回空字典。
         """
-        from .config_file_parser import parse_config_file
+        from aha_common_utils.config_file_parser import merge_configs as _merge
+        from aha_common_utils.config_file_parser import read_config
 
-        if self.toml_file:
-            return parse_config_file(self.toml_file)
-        if self.yaml_file:
-            return parse_config_file(self.yaml_file)
-        if self.json_file:
-            return parse_config_file(self.json_file)
-        return None
+        all_data: list[dict[str, Any]] = []
+        for f in self.yaml_files:
+            try:
+                all_data.append(read_config(f))
+            except (ValueError, FileNotFoundError):
+                pass
+        for f in self.toml_files:
+            try:
+                all_data.append(read_config(f))
+            except (ValueError, FileNotFoundError):
+                pass
+        for f in self.json_files:
+            try:
+                all_data.append(read_config(f))
+            except (ValueError, FileNotFoundError):
+                pass
+        for f in self.config_files:
+            try:
+                all_data.append(read_config(f))
+            except (ValueError, FileNotFoundError):
+                pass
+        return _merge(*all_data) if all_data else {}
 
     def list_registered_configs(self) -> Dict[str, Dict[str, Any]]:
         """列出所有已注册的配置
