@@ -49,11 +49,15 @@ class ProviderRegistry:
     # 用于管理 provider 组的配置名称
     _provider_groups: Dict[str, str] = {}
 
-    # 全局配置文件路径
+    # 全局配置文件路径（DEPRECATED: 使用 AppConfig 代替）
     _global_config_file: Optional[str] = None
 
     # 全局配置数据缓存（从配置文件加载的完整配置）
+    # DEPRECATED: 使用 _app_config + AppConfig.model_dump() 实时查询代替
     _global_config_data: Optional[Dict[str, Any]] = None
+
+    # AppConfig 实例引用（无状态、实时查询，推荐）
+    _app_config: Any | None = None
 
     # 多进程共享管理器
     _manager: Optional[multiprocessing.managers.SyncManager] = None
@@ -326,8 +330,7 @@ class ProviderRegistry:
             return
         try:
             with cls._lock:  # pylint: disable=not-context-manager
-                cls._shared_registry[name] = (
-                    module_path, class_name, singleton)  # pylint: disable=unsupported-assignment-operation
+                cls._shared_registry[name] = (module_path, class_name, singleton)  # pylint: disable=unsupported-assignment-operation
                 logger.debug(f"[ProviderRegistry] Synced {name} to shared registry")
         except Exception as e:
             logger.warning(f"[ProviderRegistry] Failed to sync {name}: {e}")
@@ -350,8 +353,7 @@ class ProviderRegistry:
         with cls._lock:  # pylint: disable=not-context-manager
             for name, (module_path, class_name) in cls._registry_info.items():
                 singleton = cls._singleton_flags.get(name, True)
-                cls._shared_registry[name] = (
-                    module_path, class_name, singleton)  # pylint: disable=unsupported-assignment-operation
+                cls._shared_registry[name] = (module_path, class_name, singleton)  # pylint: disable=unsupported-assignment-operation
 
         logger.info(f"[ProviderRegistry] Multiprocessing enabled, synced {len(cls._registry_info)} providers")
 
@@ -495,22 +497,24 @@ class ProviderRegistry:
 
     @classmethod
     def set_config_file(cls, config_file: str):
-        """设置全局配置文件路径
+        """（已废弃）设置全局配置文件路径。
+
+        请改用 AppConfig 注入：
+            ProviderRegistry.set_app_config(app_settings)
 
         设置后，所有 get_instance_from_config 调用都会自动使用此配置文件，
         除非显式传入 config_file 参数覆盖。
 
         Args:
             config_file: 配置文件路径（支持 .yaml/.yml/.toml/.json）
-
-        Examples:
-            >>> # 启动时设置一次
-            >>> ProviderRegistry.set_config_file("config.yaml")
-            >>>
-            >>> # 后续所有调用都自动使用此配置
-            >>> cache = ProviderRegistry.get_instance_from_config(CacheDao, "diskcache")
-            >>> embedder = ProviderRegistry.get_instance_from_config(Embedder, "openai-embedder")
         """
+        import warnings
+
+        warnings.warn(
+            "ProviderRegistry.set_config_file() is deprecated. Use ProviderRegistry.set_app_config() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from .config_file_parser import parse_config_file
 
         cls._global_config_file = config_file
@@ -533,6 +537,28 @@ class ProviderRegistry:
         cls._global_config_file = None
         cls._global_config_data = None
         logger.debug("Cleared global config file")
+
+    @classmethod
+    def set_app_config(cls, app_config: Any) -> None:
+        """设置 AppConfig 实例作为唯一配置数据源。
+
+        替代旧的 _global_config_data 机制，ProviderRegistry 不再持有配置副本，
+        而是通过此引用实时查询 AppConfig 获取最新配置。
+
+        Args:
+            app_config: AppConfig 实例（如 w5_flow_commons.config.Settings 单例）。
+        """
+        cls._app_config = app_config
+        logger.debug("AppConfig 已注入 ProviderRegistry")
+
+    @classmethod
+    def get_app_config(cls) -> Any | None:
+        """获取当前 AppConfig 实例。
+
+        Returns:
+            当前注入的 AppConfig 实例；未注入时返回 None。
+        """
+        return cls._app_config
 
     @classmethod
     def get_config_class(cls, name: str) -> Optional[Type]:
@@ -678,7 +704,20 @@ class ProviderRegistry:
             except Exception as e:
                 logger.warning(f"Failed to load config from env for {provider_name}: {e}")
 
-        # 5. 从配置文件加载（会覆盖环境变量）
+        # 4.5. 从 AppConfig 查询配置（无状态、实时查询，替代旧 _global_config_data）
+        config_path = cls.get_config_path(provider_name)
+        if cls._app_config is not None and config_path:
+            try:
+                from aha_common_utils.config_file_parser import extract_nested_config
+
+                app_file_config: dict[str, Any] = extract_nested_config(cls._app_config.model_dump(), config_path) or {}
+                if app_file_config:
+                    params.update(app_file_config)
+                    logger.debug(f"Loaded config from AppConfig for {provider_name}: {list(app_file_config.keys())}")
+            except Exception as e:
+                logger.warning(f"Failed to load config from AppConfig for {provider_name}: {e}")
+
+        # 5. 从配置文件加载（会覆盖环境变量，用于显式传入 config_file 的场景）
         # 优先使用传入的 config_file，其次使用全局配置
         actual_config_file = config_file or cls._global_config_file
 
