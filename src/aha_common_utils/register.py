@@ -704,16 +704,22 @@ class ProviderRegistry:
             except Exception as e:
                 logger.warning(f"Failed to load config from env for {provider_name}: {e}")
 
-        # 4.5. 从 AppConfig 查询配置（无状态、实时查询，替代旧 _global_config_data）
+        # 4.5. 从 _global_config_data 查询嵌套配置
+        # _global_config_data 由 _sync_toml_to_provider_registry() 注入，
+        # 包含从 TOML/YAML 文件解析的嵌套结构（如 {"embedding": {"openai-embed": {...}}}）。
+        # _app_config.model_dump() 是扁平字段，不能用于嵌套路径提取。
         config_path = cls.get_config_path(provider_name)
-        if cls._app_config is not None and config_path:
+        if cls._global_config_data is not None and config_path:
             try:
                 from aha_common_utils.config_file_parser import extract_nested_config
 
-                app_file_config: dict[str, Any] = extract_nested_config(cls._app_config.model_dump(), config_path) or {}
-                if app_file_config:
-                    params.update(app_file_config)
-                    logger.debug(f"Loaded config from AppConfig for {provider_name}: {list(app_file_config.keys())}")
+                nested_config: dict[str, Any] = extract_nested_config(cls._global_config_data, config_path) or {}
+                if nested_config:
+                    params.update(nested_config)
+                    logger.debug(
+                        f"Loaded nested config for {provider_name} "
+                        f"from _global_config_data: {list(nested_config.keys())}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load config from AppConfig for {provider_name}: {e}")
 
