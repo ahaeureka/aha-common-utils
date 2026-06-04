@@ -20,10 +20,17 @@ if TYPE_CHECKING:
     from .path_utils import find_env_files_recursive, find_project_root
     from .register import ProviderRegistry, register_provider, register_provider_group
     from .settings import (
+        AppConfig,
         SecureBaseSettings,
+        build_env_specific_local_file,
+        build_json_config_files,
         build_layered_env_files,
         build_sensitive_env_file,
         build_toml_config_files,
+        build_yaml_config_files,
+        merge_configs,
+        read_config,
+        write_config,
     )
     from .snowflake_id import (
         SnowflakeIDGenerator,
@@ -48,8 +55,16 @@ __all__ = [
     # 安全分层配置
     "SecureBaseSettings",
     "build_toml_config_files",
+    "build_yaml_config_files",
+    "build_json_config_files",
     "build_sensitive_env_file",
+    "build_env_specific_local_file",
     "build_layered_env_files",  # 向后兼容
+    # 统一配置入口
+    "AppConfig",
+    "read_config",
+    "write_config",
+    "merge_configs",
     # 路径工具
     "find_project_root",
     "find_env_files_recursive",
@@ -150,19 +165,45 @@ def __getattr__(name: str) -> Any:
 
         return {"setup_tracing": setup_tracing, "get_tracer": get_tracer}[name]
 
-    if name in {"SecureBaseSettings", "build_layered_env_files", "build_toml_config_files", "build_sensitive_env_file"}:
+    if name in {
+        "SecureBaseSettings",
+        "build_layered_env_files",
+        "build_toml_config_files",
+        "build_yaml_config_files",
+        "build_json_config_files",
+        "build_sensitive_env_file",
+        "build_env_specific_local_file",
+        "AppConfig",
+        "read_config",
+        "write_config",
+        "merge_configs",
+    }:
         from .settings import (
+            AppConfig,
             SecureBaseSettings,
+            build_env_specific_local_file,
+            build_json_config_files,
             build_layered_env_files,
             build_sensitive_env_file,
             build_toml_config_files,
+            build_yaml_config_files,
+            merge_configs,
+            read_config,
+            write_config,
         )
 
         return {
             "SecureBaseSettings": SecureBaseSettings,
             "build_layered_env_files": build_layered_env_files,
             "build_toml_config_files": build_toml_config_files,
+            "build_yaml_config_files": build_yaml_config_files,
+            "build_json_config_files": build_json_config_files,
             "build_sensitive_env_file": build_sensitive_env_file,
+            "build_env_specific_local_file": build_env_specific_local_file,
+            "AppConfig": AppConfig,
+            "read_config": read_config,
+            "write_config": write_config,
+            "merge_configs": merge_configs,
         }[name]
 
     if name in {"CliApp", "Router", "Opt", "Arg", "EnvOpt", "SecretOpt", "FlagOpt"}:

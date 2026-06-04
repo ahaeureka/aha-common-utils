@@ -4,6 +4,7 @@
 - ``find_project_root``              — 向上查找包含 pyproject.toml 的目录
 - ``build_toml_config_files``        — 返回可提交的 TOML 配置文件列表
 - ``build_yaml_config_files``        — 返回可提交的 YAML 配置文件列表
+- ``build_json_config_files``        — 返回可提交的 JSON 配置文件列表
 - ``build_sensitive_env_file``       — 返回 .env.local（已 .gitignore）路径
 - ``build_env_specific_local_file``  — 返回 .env.<APP_ENV>.local 路径（优先级高于 .env.local）
 - ``build_layered_env_files``        — 向后兼容旧接口
@@ -22,6 +23,7 @@ __all__ = [
     "find_project_root",
     "build_toml_config_files",
     "build_yaml_config_files",
+    "build_json_config_files",
     "build_sensitive_env_file",
     "build_env_specific_local_file",
     "build_layered_env_files",
@@ -168,6 +170,58 @@ def build_yaml_config_files(
         )
     else:
         logger.debug("[yaml_config] APP_ENV=%r, 未在 %s 中找到任何 config.yaml/yml", app_env, base_dir)
+    return existing
+
+
+# ---------------------------------------------------------------------------
+# JSON 配置文件（非敏感，可提交）
+# ---------------------------------------------------------------------------
+
+
+def build_json_config_files(
+    base_dir: Path | None = None,
+    app_env: str | None = None,
+) -> list[Path]:
+    """返回应加载的 JSON 配置文件列表（仅包含磁盘上实际存在的文件）。
+
+    加载顺序（优先级从低→高）：
+
+    1. ``config.json``             — 基础非敏感默认值，**可提交版本库**
+    2. ``config.<app_env>.json``   — 环境专属覆盖，**可提交版本库**
+
+    .. important::
+        JSON 文件中 **不应包含** 密码、API Key 等敏感信息。
+        敏感信息请放入 ``.env.local``（已 .gitignore）或进程环境变量。
+
+    Args:
+        base_dir: 查找目录；为 None 时自动定位项目根目录（含 pyproject.toml）。
+        app_env:  环境标识符；为 None 时读取 ``APP_ENV`` 环境变量（默认 development）。
+
+    Returns:
+        存在的 JSON 文件 ``Path`` 列表，按优先级从低到高排列。
+    """
+    if base_dir is None:
+        base_dir = find_project_root()
+    if app_env is None:
+        app_env = os.environ.get("APP_ENV", "development").strip().lower()
+
+    existing: list[Path] = []
+    base_file = base_dir / "config.json"
+    if base_file.is_file():
+        existing.append(base_file)
+    if app_env:
+        env_file = base_dir / f"config.{app_env}.json"
+        if env_file.is_file():
+            existing.append(env_file)
+
+    if existing:
+        logger.debug(
+            "[json_config] APP_ENV=%r, 加载 JSON 文件（低→高优先级）: %s",
+            app_env,
+            [p.name for p in existing],
+        )
+    else:
+        logger.debug("[json_config] APP_ENV=%r, 未在 %s 中找到任何 config.json", app_env, base_dir)
     return existing
 
 

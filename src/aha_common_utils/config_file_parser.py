@@ -249,11 +249,11 @@ def get_env_with_prefix(
         if case_sensitive:
             if not key.startswith(prefix):
                 continue
-            result_key = key[len(prefix):] if strip_prefix else key
+            result_key = key[len(prefix) :] if strip_prefix else key
         else:
             if not key.upper().startswith(prefix.upper()):
                 continue
-            result_key = key[len(prefix):] if strip_prefix else key
+            result_key = key[len(prefix) :] if strip_prefix else key
 
         # 转换为小写（如果不区分大小写）
         if not case_sensitive:
@@ -587,6 +587,92 @@ def load_config_with_env(
     return base_config
 
 
+# ============================================================================
+# 统一读写 API（settings.py 入口委托）
+# ============================================================================
+
+
+def read_config(config_file: str | Path) -> Dict[str, Any]:
+    """统一读入口。根据扩展名自动选择解析器。
+
+    Args:
+        config_file: 配置文件路径（.yaml/.yml/.toml/.json/.ini/.cfg/.env）。
+
+    Returns:
+        配置字典。
+
+    TODO(Task 2): 添加 `path` 参数支持嵌套子树提取。
+    """
+    return parse_config_file(config_file)
+
+
+def write_config(
+    data: Dict[str, Any],
+    config_file: str | Path,
+) -> None:
+    """统一写入口。根据扩展名自动选择序列化器。
+
+    Args:
+        data: 要写入的配置字典。
+        config_file: 目标文件路径。
+
+    TODO(Task 2): 添加 `path` 参数支持部分更新，添加 `style` 参数覆盖扩展名推断。
+    """
+    import json
+    import os as _os
+
+    file_path = Path(config_file)
+    suffix = file_path.suffix.lower()
+
+    _os.makedirs(file_path.parent, exist_ok=True)
+
+    if suffix in (".yaml", ".yml"):
+        try:
+            import yaml
+
+            with open(config_file, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True)
+        except ImportError as exc:
+            raise ValueError("PyYAML is not installed. Install it with: pip install pyyaml") from exc
+    elif suffix == ".toml":
+        try:
+            import tomli_w
+
+            with open(config_file, "wb") as f:
+                tomli_w.dump(data, f)
+        except ImportError:
+            raise ValueError("tomli-w is not installed. Install it with: pip install tomli-w") from None
+    elif suffix == ".json":
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    else:
+        raise ValueError(f"Unsupported config file format: {suffix}. Supported: .yaml, .yml, .toml, .json")
+
+
+def merge_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
+    """深度合并多个配置字典。后者覆盖前者。嵌套 dict 递归合并。
+
+    Returns:
+        合并后的配置字典。
+    """
+    if not configs:
+        return {}
+
+    merged: Dict[str, Any] = {}
+    for config in configs:
+        _deep_merge(merged, config)
+    return merged
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
+    """递归地将 override 合并到 base 中（就地修改）。"""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+
+
 __all__ = [
     # 配置文件解析
     "parse_config_file",
@@ -602,4 +688,8 @@ __all__ = [
     # Pydantic Settings
     "create_settings_class",
     "load_config_with_env",
+    # 统一读写 API
+    "read_config",
+    "write_config",
+    "merge_configs",
 ]
