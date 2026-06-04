@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Set
 
 from pydantic import model_validator
+from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -44,6 +45,45 @@ from ._discovery import (
 )
 
 __all__ = ["SecureBaseSettings"]
+
+
+class JsonConfigSettingsSource(PydanticBaseSettingsSource):
+    """从 JSON 文件加载配置的 pydantic-settings source。"""
+
+    def __init__(self, settings_cls: type[BaseSettings]):
+        super().__init__(settings_cls)
+        self.json_files: list[Path] = []
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        import json as _json
+
+        for file_path in self.json_files:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                if field_name in data:
+                    return data[field_name], field_name, True
+            except (FileNotFoundError, _json.JSONDecodeError):
+                continue
+        return None, field_name, False
+
+    def prepare_field_value(self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool) -> Any:
+        return value
+
+    def __call__(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        import json as _json
+
+        for file_path in self.json_files:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                for field_name in self.settings_cls.model_fields:
+                    if field_name in data:
+                        d[field_name] = data[field_name]
+            except (FileNotFoundError, _json.JSONDecodeError):
+                continue
+        return d
 
 
 class SecureBaseSettings(BaseSettings):
@@ -157,6 +197,14 @@ class SecureBaseSettings(BaseSettings):
             # 按优先级从高→低追加：先 config.<APP_ENV>.toml，再 config.toml
             for toml_path in reversed(build_toml_config_files(base_dir=base_dir)):
                 sources.append(TomlConfigSettingsSource(settings_cls, toml_file=toml_path))
+
+        # ── JSON 配置文件（非敏感，可提交版本库） ──────────────────────────
+        # 子类可在 model_config 中手动指定 json_file 跳过自动探测
+        json_files = cls.model_config.get("json_file")
+        if json_files:
+            json_config = JsonConfigSettingsSource(settings_cls)
+            json_config.json_files = json_files if isinstance(json_files, list) else [json_files]
+            sources.append(json_config)
 
         # ── YAML 配置文件（非敏感，可提交版本库） ──────────────────────────
         # 子类可在 model_config 中手动指定 yaml_file 跳过自动探测
