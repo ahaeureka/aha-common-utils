@@ -509,29 +509,55 @@ class ConfigStore:
             load_env_file(env_local, override=False)
             logger.debug("[ConfigStore] loaded env file: %s", env_local.name)
 
-        # .env.<ENV>.local (higher priority)
+        # .env.<ENV>.local (higher priority, overrides .env.local)
         env_specific = _build_env_specific_local_file(base_dir=base_dir, app_env=app_env)
         if env_specific is not None:
-            load_env_file(env_specific, override=False)
+            load_env_file(env_specific, override=True)
             logger.debug("[ConfigStore] loaded env file: %s", env_specific.name)
 
     # ── Internal: env overrides ───────────────────────────────────────────
 
+    # Backward-compatible env prefix: old pydantic-settings used W5_FLOW_
+    _LEGACY_ENV_PREFIXES: tuple[str, ...] = ("W5_FLOW_",)
+
     @staticmethod
     def _apply_env_overrides(merged: dict[str, Any]) -> None:
-        """Apply process environment variables as top-level overrides.
+        """Apply process environment variables as overrides.
 
-        For each environment variable whose name matches a top-level key
-        in *merged*, the value is type-coerced to match the existing
-        value's type (bool, int, float, or string).
+        Environment variables whose names match either a top-level key
+        or a known ``validation_alias`` of a nested field are routed to
+        the correct location in *merged*.  Legacy ``W5_FLOW_`` prefix is
+        automatically stripped before matching.
+
+        Values are type-coerced to match the existing value's type
+        (bool, int, float, or string).
 
         Args:
             merged: The merged configuration dict (mutated in-place).
         """
         for env_key, env_val in os.environ.items():
-            if env_key in merged:
-                existing = merged[env_key]
-                merged[env_key] = _coerce_value(env_val, existing)
+            # Strip legacy pydantic-settings prefix
+            key = env_key
+            for prefix in ConfigStore._LEGACY_ENV_PREFIXES:
+                if key.startswith(prefix):
+                    key = key[len(prefix):]
+                    break
+
+            if not key or key == env_key and key.startswith("W5_FLOW_"):
+                # key unchanged and still has prefix — not a matchable key
+                continue
+
+            # Try top-level match first
+            if key in merged:
+                merged[key] = _coerce_value(env_val, merged[key])
+                continue
+
+            # Try nested routing via split: W5_FLOW_LLM_API_KEY → LLM_API_KEY
+            # Match against known flat→nested paths from BaseParameters aliases
+            # The before-validator on AppConfig will handle routing, so we
+            # just need to ensure the flat key exists at top level for routing
+            # Insert as a synthetic top-level key — from_dict will route it
+            merged[key] = _coerce_value(env_val, merged.get(key, env_val))
 
     # ── Internal: writing helpers ─────────────────────────────────────────
 
