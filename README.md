@@ -1,4 +1,4 @@
-# aha-common-utils — 配置文件加载系统使用手册
+# aha-common-utils — 配置管理系统使用手册
 
 ## 目录
 
@@ -11,14 +11,21 @@
   - [.env.local 敏感文件](#envlocal-敏感文件)
   - [环境变量](#环境变量)
 - [配置文件命名与发现规则](#配置文件命名与发现规则)
-- [SecureBaseSettings 基类](#securebasesettings-基类)
+- [BaseParameters 配置模型](#baseparameters-配置模型)
   - [基本用法](#基本用法)
-  - [手动指定配置文件路径](#手动指定配置文件路径)
+  - [嵌套配置模型](#嵌套配置模型)
+  - [from_dict / to_dict / update_from](#from_dict--to_dict--update_from)
   - [敏感字段自动屏蔽](#敏感字段自动屏蔽)
   - [生产安全校验](#生产安全校验)
   - [safe_dump()](#safe_dump)
+  - [field() 工厂方法](#field-工厂方法)
+- [ConfigStore 统一读写 API](#configstore-统一读写-api)
+  - [load() — 加载配置](#load--加载配置)
+  - [save() — 写入配置](#save--写入配置)
+  - [环境变量自动覆盖](#环境变量自动覆盖)
+- [从 SecureBaseSettings 迁移](#从-securebasesettings-迁移)
 - [项目文件布局参考](#项目文件布局参考)
-- [环境变量 APP\_ENV](#环境变量-app_env)
+- [环境变量 APP_ENV](#环境变量-app_env)
 - [工具函数 API](#工具函数-api)
 - [配置文件示例](#配置文件示例)
 - [常见问题](#常见问题)
@@ -28,40 +35,40 @@
 
 ## 概述
 
-`aha-common-utils` 提供了一套 **安全分层配置加载系统**，基于 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) 构建。核心设计原则：
+`aha-common-utils` 提供了一套 **模型驱动的分层配置管理系统**，基于 [pydantic](https://docs.pydantic.dev/) 构建。核心设计原则：
 
-1. **分层覆盖** — 多来源配置按优先级依次覆盖，灵活适配 `开发 / 测试 / 生产` 各环境。
-2. **格式多样** — 同时支持 TOML、YAML、`.env`、进程环境变量。
-3. **安全优先** — 敏感字段自动屏蔽、生产环境默认值校验、敏感信息与版本库隔离。
-4. **零配置启动** — 只要在项目根目录放置约定名称的配置文件，即可自动发现并加载。
+1. **模型即 schema** — 使用 `BaseParameters`（纯 `BaseModel`）定义配置结构、默认值和校验规则，配置文件的层级结构与模型嵌套一一对应。
+2. **分层覆盖** — 多来源配置按优先级依次覆盖，灵活适配 `开发 / 测试 / 生产` 各环境。
+3. **格式多样** — 同时支持 TOML、YAML、`.env`、进程环境变量。
+4. **安全优先** — 敏感字段自动屏蔽、生产环境默认值校验、敏感信息与版本库隔离。
+5. **读写闭环** — `ConfigStore` 提供 `load() → 模型 → save()` 的双向 I/O，支持程序化修改配置文件。
+6. **零配置启动** — 只要在项目根目录放置约定名称的配置文件，即可自动发现并加载。
 
 ---
 
 ## 快速上手
 
-### 1. 安装依赖
-
-```bash
-uv add aha-common-utils
-```
-
-### 2. 定义配置类
+### 1. 定义配置模型
 
 ```python
-from aha_common_utils.settings import SecureBaseSettings
-from pydantic_settings import SettingsConfigDict
+from aha_common_utils.config_base import BaseParameters
 
-class AppSettings(SecureBaseSettings):
-    model_config = SettingsConfigDict(env_prefix="MYAPP_")
-
-    APP_ENV: str = "development"
-    DATABASE_URL: str = "postgresql+asyncpg://localhost/dev"
-    SECRET_KEY: str = "change-me-in-production"
-    LOG_LEVEL: str = "INFO"
-    LLM_API_KEY: str = ""
+class AppSettings(BaseParameters):
+    """应用配置模型。"""
+    app_env: str = BaseParameters.field(default="development", description="运行环境")
+    database_url: str = BaseParameters.field(
+        default="postgresql+asyncpg://localhost/dev",
+        description="PostgreSQL 连接字符串",
+    )
+    log_level: str = BaseParameters.field(default="INFO")
+    llm_api_key: str = BaseParameters.field(
+        default="",
+        description="LLM API Key — 敏感，仅 .env.local 注入",
+        tags=["secret"],
+    )
 ```
 
-### 3. 放置配置文件
+### 2. 放置配置文件
 
 在项目根目录（含 `pyproject.toml` 的目录）创建：
 
@@ -70,43 +77,53 @@ myproject/
 ├── pyproject.toml
 ├── config.toml                    # 基础默认配置（提交版本库）
 ├── config.development.toml        # 开发环境覆盖（提交版本库）
-├── config.production.toml         # 生产环境覆盖（提交版本库）
 ├── .env.local                     # 敏感值（已 .gitignore，不提交）
 └── main.py
 ```
 
-### 4. 实例化并使用
+### 3. 使用 ConfigStore 加载
 
 ```python
-settings = AppSettings()
+from aha_common_utils.config_store import ConfigStore
+
+store = ConfigStore()
+settings = store.load(AppSettings)
 
 # 安全打印（敏感字段被屏蔽）
 print(settings)
-# AppSettings(APP_ENV='development', DATABASE_URL='post****', SECRET_KEY='chan****', ...)
+# AppSettings(app_env='development', database_url='post****', llm_api_key='****')
 
 # 获取安全字典（适合日志输出）
 print(settings.safe_dump())
+```
+
+### 4. 程序化修改并写回
+
+```python
+# 修改并保存
+settings.update_from({"log_level": "DEBUG"})
+store.save(settings, "config.development.toml")
+
+# 部分更新（仅修改 [app] 段，保留其他段不变）
+store.save({"debug": True}, "config.toml", path="app")
 ```
 
 ---
 
 ## 配置加载优先级
 
-加载优先级 **从低到高** 排列如下——后加载的值会 **覆盖** 先加载的同名字段：
+加载优先级 **从低到高** 排列——后加载的值会 **覆盖** 先加载的同名字段：
 
 | 优先级 | 来源 | 说明 | 提交版本库 |
 |:---:|------|------|:---:|
-| 1（最低） | 代码默认值 | Settings 类中声明的字段默认值 | ✅ |
-| 2 | `config.yaml` / `config.yml` | YAML 基础非敏感配置 | ✅ |
-| 3 | `config.<APP_ENV>.yaml/yml` | YAML 环境专属覆盖 | ✅ |
-| 4 | `config.toml` | TOML 基础非敏感配置 | ✅ |
-| 5 | `config.<APP_ENV>.toml` | TOML 环境专属覆盖 | ✅ |
-| 6 | `.env.local` | 仅存放敏感值（密码/API Key） | ❌ |
-| 7（最高） | 进程环境变量 | 容器/CI 注入，最终覆盖 | — |
+| 1（最低） | 代码默认值 | `BaseParameters` 子类中声明的字段默认值 | ✅ |
+| 2 | `config.toml` | TOML 基础非敏感配置 | ✅ |
+| 3 | `config.<APP_ENV>.toml` | TOML 环境专属覆盖 | ✅ |
+| 4 | `.env.local` | 通用本地敏感值（密码/API Key） | ❌ |
+| 5 | `.env.<APP_ENV>.local` | 环境专属敏感值 | ❌ |
+| 6（最高） | 进程环境变量 | 容器/CI 注入，最终覆盖 | — |
 
-> **示例**：如果 `config.toml` 中设置了 `LOG_LEVEL = "INFO"`，而 `config.development.toml` 中设置了 `LOG_LEVEL = "DEBUG"`，则开发环境最终值为 `"DEBUG"`。环境变量 `LOG_LEVEL=WARNING` 可以覆盖以上所有。
-
-> **提示**：TOML 和 YAML 配置文件可以同时存在。TOML 的优先级高于 YAML，因此当两者定义了相同字段时，TOML 中的值会生效。
+> 环境变量支持 `SECTION_FIELD` 命名模式自动路由到嵌套模型。例如 `LLM_API_KEY` 自动映射到 `llm.api_key`，`EMBEDDING_OPENAI_BASE_URL` 自动映射到 `embedding.openai.base_url`。无需手动配置 `env_prefix`。
 
 ---
 
@@ -114,32 +131,47 @@ print(settings.safe_dump())
 
 ### TOML 配置文件
 
-标准 [TOML](https://toml.io/) 格式，**推荐作为主配置格式**。
+标准 [TOML](https://toml.io/) 格式，**推荐作为主配置格式**。支持嵌套 section 匹配模型层级：
 
 ```toml
 # config.toml — 基础默认配置
-APP_ENV   = "development"
-APP_NAME  = "skillforge"
-DEBUG     = false
-LOG_LEVEL = "INFO"
+[app]
+env   = "development"
+name  = "skillforge"
+debug = false
+log_level = "INFO"
 
-DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
-REDIS_URL    = "redis://localhost:6379/0"
+[database]
+url = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
+provider = "sqlmodel-pg"
 
-DEFAULT_LLM_MODEL = "openai:gpt-4o-mini"
+[redis]
+url = "redis://localhost:6379/0"
+key_prefix = "skillforge:development"
+
+[llm]
+default_model = "openai:gpt-4o-mini"
+provider = "langchain-openai"
+api_key = ""   # 通过 .env.local 或 ${env:LLM_API_KEY} 注入
+
+[llm.langchain_openai]
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com"
 ```
 
 ```toml
 # config.development.toml — 开发环境覆盖
-DEBUG     = true
-LOG_LEVEL = "DEBUG"
+[app]
+debug = true
+log_level = "DEBUG"
 
-DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge_dev"
+[database]
+url = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge_dev"
 ```
 
 自动发现的文件名：
 - `config.toml` — 基础配置
-- `config.<APP_ENV>.toml` — 环境配置（如 `config.development.toml`、`config.production.toml`）
+- `config.<APP_ENV>.toml` — 环境配置（如 `config.development.toml`）
 
 ### YAML 配置文件
 
@@ -147,30 +179,29 @@ DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge
 
 ```yaml
 # config.yaml — 基础默认配置
-APP_ENV: development
-APP_NAME: skillforge
-DEBUG: false
-LOG_LEVEL: INFO
+app:
+  env: development
+  name: skillforge
+  debug: false
+  log_level: INFO
 
-DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
-REDIS_URL: "redis://localhost:6379/0"
-```
+database:
+  url: "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
+  provider: sqlmodel-pg
 
-```yaml
-# config.development.yaml — 开发环境覆盖
-DEBUG: true
-LOG_LEVEL: DEBUG
+redis:
+  url: "redis://localhost:6379/0"
 ```
 
 自动发现的文件名（`.yaml` 优先于 `.yml`）：
 - `config.yaml` 或 `config.yml` — 基础配置
 - `config.<APP_ENV>.yaml` 或 `config.<APP_ENV>.yml` — 环境配置
 
-> **注意**：同一优先级层级中，`.yaml` 和 `.yml` 只会加载其中一个，`.yaml` 优先。
-
 ### .env.local 敏感文件
 
 标准 dotenv 格式，**仅存放敏感值**，**必须加入 `.gitignore`**。
+
+环境变量名使用 `SECTION_FIELD` 命名模式自动路由到嵌套模型：
 
 ```bash
 # .env.local — 个人本地敏感变量，绝不提交版本库
@@ -188,17 +219,10 @@ SENTRY_DSN=https://xxxxxx@sentry.io/12345
 export APP_ENV=production
 export SECRET_KEY=prod-secret-xxxxxxxx
 export DATABASE_URL=postgresql+asyncpg://user:pass@db-prod:5432/app
+export LLM_API_KEY=sk-prod-xxxxxxxx
 ```
 
-如果 Settings 子类配置了 `env_prefix`，环境变量名需要加上前缀：
-
-```python
-class AppSettings(SecureBaseSettings):
-    model_config = SettingsConfigDict(env_prefix="MYAPP_")
-    LOG_LEVEL: str = "INFO"
-
-# 对应的环境变量名：MYAPP_LOG_LEVEL=DEBUG
-```
+环境变量名会自动按 `SECTION_FIELD` 模式路由到嵌套模型字段。无需配置 `env_prefix`。
 
 ---
 
@@ -211,61 +235,81 @@ class AppSettings(SecureBaseSettings):
 | 文件名 | 格式 | 说明 |
 |--------|------|------|
 | `config.toml` | TOML | 基础默认值 |
-| `config.<APP_ENV>.toml` | TOML | 环境专属覆盖（如 `config.production.toml`） |
+| `config.<APP_ENV>.toml` | TOML | 环境专属覆盖 |
 | `config.yaml` | YAML | 基础默认值 |
 | `config.yml` | YAML | 基础默认值（`config.yaml` 不存在时使用） |
 | `config.<APP_ENV>.yaml` | YAML | 环境专属覆盖 |
 | `config.<APP_ENV>.yml` | YAML | 环境专属覆盖（`.yaml` 不存在时使用） |
-| `.env.local` | dotenv | 敏感值（⚠️ 不提交版本库） |
+| `.env.local` | dotenv | 通用敏感值（⚠️ 不提交版本库） |
+| `.env.<APP_ENV>.local` | dotenv | 环境专属敏感值（优先级高于 `.env.local`） |
 
 所有文件均为 **可选**。只存在的文件才会被加载，不存在的文件会被安静跳过。
 
 ---
 
-## SecureBaseSettings 基类
+## BaseParameters 配置模型
 
 ### 基本用法
 
-所有需要分层配置加载的 Settings 类应继承 `SecureBaseSettings`，而非直接继承 `pydantic_settings.BaseSettings`：
+所有配置模型应继承 `BaseParameters`，而非 `pydantic.BaseModel`：
 
 ```python
-from aha_common_utils.settings import SecureBaseSettings
-from pydantic_settings import SettingsConfigDict
+from aha_common_utils.config_base import BaseParameters
 
-class AppSettings(SecureBaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="MYAPP_",    # 可选：环境变量前缀
+class AppSettings(BaseParameters):
+    app_env: str = BaseParameters.field(
+        default="development",
+        description="运行环境",
+        tags=["app"],
     )
-
-    APP_ENV: str = "development"
-    DATABASE_URL: str = "postgresql+asyncpg://localhost/dev"
-    SECRET_KEY: str = "change-me-in-production"
-    LOG_LEVEL: str = "INFO"
-
-settings = AppSettings()
+    database_url: str = BaseParameters.field(
+        default="postgresql+asyncpg://localhost/dev",
+        description="PostgreSQL 连接字符串",
+    )
+    secret_key: str = BaseParameters.field(
+        default="change-me-in-production",
+        description="JWT 签名密钥",
+        tags=["secret"],
+    )
+    log_level: str = BaseParameters.field(default="INFO")
 ```
 
-### 手动指定配置文件路径
+### 嵌套配置模型
 
-如果不想使用自动发现，可以在 `model_config` 中显式指定文件路径：
+推荐将相关配置组织为嵌套模型，与 TOML 文件层级一一对应：
 
 ```python
-class AppSettings(SecureBaseSettings):
-    model_config = SettingsConfigDict(
-        toml_file="path/to/custom.toml",    # 指定 TOML 文件
-    )
-    # ...
+class DatabaseConfig(BaseParameters):
+    url: str = BaseParameters.field(default="postgresql+asyncpg://localhost/db")
+    provider: str = BaseParameters.field(default="sqlmodel-pg")
+    pool_size: int = BaseParameters.field(default=10)
+
+class LLMConfig(BaseParameters):
+    default_model: str = BaseParameters.field(default="openai:gpt-4o-mini")
+    api_key: str = BaseParameters.field(default="", tags=["secret"])
+
+class AppConfig(BaseParameters):
+    """根配置模型。"""
+    app_env: str = BaseParameters.field(default="development")
+    database: DatabaseConfig = BaseParameters.field(default=DatabaseConfig())
+    llm: LLMConfig = BaseParameters.field(default=LLMConfig())
 ```
+
+嵌套模型路径 `app_config.llm.api_key` 对应 TOML 的 `[llm]` section + `api_key` key，也对应环境变量 `LLM_API_KEY`。
+
+### from_dict / to_dict / update_from
 
 ```python
-class AppSettings(SecureBaseSettings):
-    model_config = SettingsConfigDict(
-        yaml_file="path/to/custom.yaml",    # 指定 YAML 文件
-    )
-    # ...
-```
+# 从字典构造（自动解析 ${env:VAR} 插值）
+cfg = AppConfig.from_dict({"app_env": "test", "database": {"url": "pg://test/db"}})
 
-> 设置 `toml_file` 时会跳过 TOML 自动探测，但 YAML 自动探测不受影响（反之亦然）。
+# 序列化为字典
+data = cfg.to_dict()
+# {'app_env': 'test', 'database': {'url': 'pg://test/db', ...}, ...}
+
+# 合并更新（跳过 fixed 字段和 None 值）
+cfg.update_from({"app_env": "production"})  # 返回 True 表示有更新
+```
 
 ### 敏感字段自动屏蔽
 
@@ -280,22 +324,22 @@ access_key, secret_key, dsn, auth, credential, database_url, redis_url
 
 ```python
 >>> print(settings)
-AppSettings(APP_ENV='development', DATABASE_URL='post****', SECRET_KEY='chan****')
+AppSettings(app_env='development', database_url='post****', llm_api_key='****')
 
 >>> settings.safe_dump()
-{'APP_ENV': 'development', 'DATABASE_URL': 'post****', 'SECRET_KEY': 'chan****'}
+{'app_env': 'development', 'database_url': 'post****', 'llm_api_key': '****'}
 ```
 
 #### 追加自定义敏感字段
 
-子类可通过 `_EXTRA_SENSITIVE_FIELDS` 类变量添加额外的敏感字段名（精确匹配，忽略大小写）：
+子类可通过 `_EXTRA_SENSITIVE_FIELDS` 类变量添加额外的敏感字段名：
 
 ```python
-class AppSettings(SecureBaseSettings):
-    _EXTRA_SENSITIVE_FIELDS = {"INTERNAL_ADMIN_TOKEN", "WEBHOOK_SECRET"}
+class AppSettings(BaseParameters):
+    _EXTRA_SENSITIVE_FIELDS = {"internal_admin_token", "webhook_secret"}
 
-    INTERNAL_ADMIN_TOKEN: str = ""
-    WEBHOOK_SECRET: str = ""
+    internal_admin_token: str = ""
+    webhook_secret: str = ""
 ```
 
 ### 生产安全校验
@@ -311,23 +355,221 @@ postgres, admin, your-secret-key, dev-only
 
 ```python
 # 生产环境中以下代码会抛出 ValueError：
-class AppSettings(SecureBaseSettings):
-    SECRET_KEY: str = "change-me-in-production"
+class AppSettings(BaseParameters):
+    secret_key: str = BaseParameters.field(default="change-me-in-production")
 
-# ValueError: [Security] 生产环境中字段 'SECRET_KEY' 使用了不安全的默认值: 'change-me-in-production'。
-#             请在 .env.local 或进程环境变量中覆盖为强值。
+# ValueError: [Security] Field 'secret_key' has insecure default 'change-me-in-production'
+#             in production (APP_ENV=production).
+#             Override via .env.local or process environment variable.
 ```
 
 ### safe_dump()
 
-返回屏蔽了敏感字段的配置字典，适合用于启动日志或诊断 API 端点：
+返回屏蔽了敏感字段的配置字典，递归处理嵌套 `BaseParameters` 子模型：
 
 ```python
 import json
 
-settings = AppSettings()
+settings = AppConfig()
 print(json.dumps(settings.safe_dump(), indent=2, ensure_ascii=False))
 ```
+
+### field() 工厂方法
+
+`BaseParameters.field()` 是 `pydantic.Field()` 的封装，支持额外元数据：
+
+```python
+class MyConfig(BaseParameters):
+    timeout: int = BaseParameters.field(
+        default=60,
+        description="超时时间（秒）",
+        tags=["network", "timeout"],
+        fixed=False,   # True 时 update_from() 跳过此字段
+        ge=0,           # 透传 pydantic Field 参数
+    )
+```
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `default` | `Any` | 字段默认值 |
+| `description` | `str \| None` | 字段描述，存入 `json_schema_extra` |
+| `tags` | `list[str] \| None` | 分类标签，如 `["secret"]`, `["llm"]` |
+| `fixed` | `bool` | True 时 `update_from()` 不修改此字段 |
+| `**kwargs` | — | 透传给 `pydantic.Field()` |
+
+---
+
+## ConfigStore 统一读写 API
+
+`ConfigStore` 是配置 I/O 的统一入口，负责文件发现、解析、合并、环境变量覆盖和模型构造。
+
+### load() — 加载配置
+
+```python
+from aha_common_utils.config_store import ConfigStore
+from myapp.config import AppConfig
+
+store = ConfigStore()
+
+# 自动发现并加载
+config = store.load(AppConfig)
+
+# 指定环境
+config = store.load(AppConfig, app_env="production")
+
+# 指定查找目录
+config = store.load(AppConfig, base_dir=Path("/app"))
+
+# 获取原始合并数据（用于 ProviderRegistry 同步）
+raw = store.raw_data  # TOML + YAML 原始 dict（模型构造前）
+```
+
+加载流程：
+1. 发现配置文件（`config.toml` → `config.<ENV>.toml`）
+2. 解析并合并（后者覆盖前者，嵌套 dict 递归合并）
+3. 加载 `.env.local` / `.env.<ENV>.local` 到进程环境变量
+4. 解析 dict 中的 `${env:VAR:-default}` 环境变量插值
+5. 应用进程环境变量覆盖（最高优先级，自动类型强制）
+6. 构造并返回模型实例
+
+### save() — 写入配置
+
+```python
+# 完整写入
+store.save(config, "config.output.toml")
+
+# 写入 YAML
+store.save(config, "config.output.yaml")
+
+# 部分更新 — 仅修改 [llm] 段，保留其他 section 不变
+store.save({"model": "gpt-5"}, "config.toml", path="llm.langchain_openai")
+
+# 使用 tomlkit 保留注释和格式
+store.save(config, "config.toml")
+```
+
+### 环境变量自动覆盖
+
+环境变量支持 **`SECTION_FIELD`** 和 **`SECTION_SUBSECTION_FIELD`** 命名模式，自动路由到嵌套模型路径：
+
+| 环境变量 | 映射路径 | 说明 |
+|---------|---------|------|
+| `LLM_API_KEY` | `llm.api_key` | 一级嵌套 |
+| `LLM_BASE_URL` | `llm.base_url` | 一级嵌套 |
+| `EMBEDDING_MODEL` | `embedding.model` | 一级嵌套 |
+| `EMBEDDING_OPENAI_BASE_URL` | `embedding.openai.base_url` | 二级嵌套 |
+| `LLM_LANGCHAIN_OPENAI_MODEL` | `llm.langchain_openai.model` | 二级嵌套 |
+| `GRAPHRAG_EMBEDDING_DIMENSION` | `graphrag.embedding_dimension` | 深层嵌套 |
+
+支持 `${env:VAR:-default}` 值级别环境变量插值：
+
+```toml
+# config.toml
+[llm]
+api_key = "${env:LLM_API_KEY}"            # 必填，无默认值时未设置会报错
+model = "${env:LLM_MODEL:-gpt-4o}"        # 有默认值，未设置时使用 gpt-4o
+base_url = "${env:LLM_BASE_URL:-https://api.openai.com}"
+```
+
+---
+
+## 从 SecureBaseSettings 迁移
+
+`SecureBaseSettings`（基于 pydantic-settings）已被 `BaseParameters`（纯 pydantic BaseModel）+ `ConfigStore` 替代。
+
+### 迁移步骤
+
+**1. 替换基类**
+
+```python
+# 旧
+from aha_common_utils.settings import SecureBaseSettings
+from pydantic_settings import SettingsConfigDict
+
+class AppSettings(SecureBaseSettings):
+    model_config = SettingsConfigDict(env_prefix="MYAPP_")
+    APP_ENV: str = "development"
+
+# 新
+from aha_common_utils.config_base import BaseParameters
+
+class AppSettings(BaseParameters):
+    app_env: str = BaseParameters.field(default="development")
+```
+
+**2. 替换扁平字段为嵌套模型**
+
+```python
+# 旧（扁平 50+ 字段）
+class AppSettings(SecureBaseSettings):
+    APP_ENV: str = "development"
+    DATABASE_URL: str = "..."
+    FALKORDB_HOST: str = "localhost"
+    FALKORDB_PORT: int = 16379
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = ""
+
+# 新（嵌套领域模型）
+class DatabaseConfig(BaseParameters):
+    url: str = BaseParameters.field(default="...")
+
+class FalkorDBConfig(BaseParameters):
+    host: str = BaseParameters.field(default="localhost")
+    port: int = BaseParameters.field(default=16379)
+
+class LLMConfig(BaseParameters):
+    api_key: str = BaseParameters.field(default="", tags=["secret"])
+    base_url: str = BaseParameters.field(default="")
+
+class AppConfig(BaseParameters):
+    app_env: str = BaseParameters.field(default="development")
+    database: DatabaseConfig = BaseParameters.field(default=DatabaseConfig())
+    falkordb: FalkorDBConfig = BaseParameters.field(default=FalkorDBConfig())
+    llm: LLMConfig = BaseParameters.field(default=LLMConfig())
+```
+
+**3. 替换 env_prefix 为 SECTION_FIELD 环境变量**
+
+```bash
+# 旧（env_prefix="W5_FLOW_"）
+W5_FLOW_DATABASE_URL=pg://...
+W5_FLOW_LLM_API_KEY=sk-...
+
+# 新（SECTION_FIELD 自动路由）
+DATABASE_URL=pg://...
+LLM_API_KEY=sk-...
+```
+
+**4. 替换实例化方式**
+
+```python
+# 旧
+settings = AppSettings()
+
+# 新
+from aha_common_utils.config_store import ConfigStore
+store = ConfigStore()
+settings = store.load(AppConfig)
+```
+
+**5. 替换字段访问**
+
+```python
+# 旧
+settings.LLM_API_KEY
+
+# 新
+settings.llm.api_key
+```
+
+### 导入路径变化
+
+| 旧路径 | 新路径 |
+|-------|-------|
+| `from aha_common_utils.settings import SecureBaseSettings` | `from aha_common_utils.config_base import BaseParameters` |
+| `from aha_common_utils.settings import find_project_root` | `from aha_common_utils.config_store import _find_project_root` |
+| `from aha_common_utils.settings import read_config, write_config` | `from aha_common_utils.settings import read_config, write_config`（兼容保留） |
+| `from aha_common_utils.settings import is_sensitive_field, mask_value` | `from aha_common_utils.config_base import is_sensitive_field, mask_value` |
 
 ---
 
@@ -346,17 +588,19 @@ myproject/
 ├── config.development.yaml         # ✅ 提交 — (可选) YAML 开发覆盖
 │
 ├── .env.local                      # ❌ gitignore — 密码/API Key 等敏感值
-├── .gitignore                      # 必须包含 .env.local
+├── .env.test.local                 # ❌ gitignore — 测试环境专属敏感值
+├── .gitignore                      # 必须包含 .env*.local
 │
 └── src/
     └── myapp/
-        └── config.py               # 配置类定义
+        ├── config.py               # 配置模型定义（BaseParameters 子类）
+        └── main.py                 # ConfigStore.load(AppConfig) 启动加载
 ```
 
 `.gitignore` 中确保包含：
 
 ```gitignore
-.env.local
+.env*.local
 ```
 
 ---
@@ -365,7 +609,7 @@ myproject/
 
 `APP_ENV` 是核心环境变量，决定：
 
-1. 加载哪个环境配置文件（`config.<APP_ENV>.toml` / `config.<APP_ENV>.yaml`）
+1. 加载哪个环境配置文件（`config.<APP_ENV>.toml`）
 2. 是否启用生产安全校验
 
 | APP_ENV | 说明 | 安全校验 |
@@ -388,136 +632,110 @@ APP_ENV = "development"
 
 ## 工具函数 API
 
-所有工具函数均可从 `aha_common_utils.settings` 导入：
+### 配置模型相关（config_base）
 
 ```python
-from aha_common_utils.settings import (
-    find_project_root,
-    build_toml_config_files,
-    build_yaml_config_files,
-    build_sensitive_env_file,
-    build_layered_env_files,   # 已废弃，向后兼容
-    is_sensitive_field,
-    mask_value,
+from aha_common_utils.config_base import (
+    BaseParameters,          # 配置模型基类
+    is_sensitive_field,       # 判断字段是否敏感
+    mask_value,               # 屏蔽敏感值（保留前4位）
+    SENSITIVE_SUBSTRINGS,     # 敏感字段关键词集合
+    INSECURE_DEFAULT_VALUES,  # 不安全默认值集合
 )
 ```
 
-### find_project_root(start=None) → Path
-
-从 `start`（默认 cwd）向上查找包含 `pyproject.toml` 的最近目录。
+### 配置读写相关（config_store）
 
 ```python
->>> from aha_common_utils.settings import find_project_root
->>> root = find_project_root()
->>> print(root)
-/app
+from aha_common_utils.config_store import ConfigStore
+
+store = ConfigStore()
+config = store.load(AppConfig)          # 加载
+store.save(config, "config.toml")       # 完整写入
+store.save(data, "config.toml", path="llm")  # 部分更新
+raw = store.raw_data                     # 原始合并 dict
 ```
 
-### build_toml_config_files(base_dir=None, app_env=None) → list[Path]
-
-返回磁盘上实际存在的 TOML 配置文件列表，按优先级从低到高排列。
+### 低级读写（settings — 兼容保留）
 
 ```python
->>> from aha_common_utils.settings import build_toml_config_files
->>> files = build_toml_config_files()
->>> [f.name for f in files]
-['config.toml', 'config.development.toml']
+from aha_common_utils.settings import (
+    read_config,     # 统一读入口（自动检测格式）
+    write_config,    # 统一写入口（自动检测格式）
+    merge_configs,   # 深度合并多个配置字典
+)
 ```
 
-### build_yaml_config_files(base_dir=None, app_env=None) → list[Path]
+### BaseParameters 实例方法
 
-返回磁盘上实际存在的 YAML 配置文件列表，按优先级从低到高排列。同一层级中 `.yaml` 优先于 `.yml`。
-
-```python
->>> from aha_common_utils.settings import build_yaml_config_files
->>> files = build_yaml_config_files()
->>> [f.name for f in files]
-['config.yaml', 'config.development.yaml']
-```
-
-### build_sensitive_env_file(base_dir=None) → Path | None
-
-返回 `.env.local` 的路径（若存在），否则返回 `None`。
-
-```python
->>> from aha_common_utils.settings import build_sensitive_env_file
->>> p = build_sensitive_env_file()
->>> print(p)
-/app/.env.local
-```
-
-### is_sensitive_field(field_name) → bool
-
-判断字段名是否对应敏感信息。
-
-```python
->>> from aha_common_utils.settings import is_sensitive_field
->>> is_sensitive_field("DATABASE_URL")
-True
->>> is_sensitive_field("LOG_LEVEL")
-False
-```
-
-### mask_value(value) → str
-
-将值屏蔽为安全的显示字符串，保留前 4 位。
-
-```python
->>> from aha_common_utils.settings import mask_value
->>> mask_value("sk-proj-abc123")
-'sk-p****'
-```
+| 方法 | 说明 |
+|------|------|
+| `from_dict(data, ignore_extra_fields=False)` | 从字典构造（含 `${env:VAR}` 插值） |
+| `to_dict()` | 序列化为字典 |
+| `update_from(source)` | 合并更新（跳过 fixed 和 None），返回 `bool` |
+| `safe_dump()` | 字典输出（敏感字段屏蔽，递归处理嵌套模型） |
+| `to_command_args(prefix="--")` | 转换为 CLI 参数列表 |
+| `get_parameter_descriptions()` | 获取所有字段元数据列表 |
 
 ---
 
 ## 配置文件示例
 
-### TOML 格式
+### TOML 格式（推荐）
 
 ```toml
 # config.toml — 基础默认配置（非敏感，提交版本库）
-APP_ENV              = "development"
-APP_NAME             = "skillforge"
-DEBUG                = false
-LOG_LEVEL            = "INFO"
 
-DATABASE_URL         = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
-REDIS_URL            = "redis://localhost:6379/0"
+[app]
+env              = "development"
+name             = "skillforge"
+debug            = false
+log_level        = "INFO"
 
-DEFAULT_LLM_MODEL   = "openai:gpt-4o-mini"
-LLM_BASE_URL         = ""
-LLM_DAILY_BUDGET_USD = 10.0
+[database]
+url      = "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
+provider = "sqlmodel-pg"
+
+[redis]
+url         = "redis://localhost:6379/0"
+key_prefix  = "skillforge:development"
+
+[llm]
+default_model   = "openai:gpt-4o-mini"
+provider        = "langchain-openai"
+base_url        = ""
+daily_budget_usd = 10.0
+
+[llm.langchain_openai]
+model    = "gpt-4o-mini"
+base_url = "https://api.openai.com"
 ```
 
 ```toml
 # config.production.toml — 生产环境覆盖
-APP_ENV   = "production"
-DEBUG     = false
-LOG_LEVEL = "WARNING"
 
-LLM_DAILY_BUDGET_USD = 100.0
+[app]
+env   = "production"
+debug = false
+log_level = "WARNING"
+
+[llm]
+daily_budget_usd = 100.0
 ```
 
 ### YAML 格式
 
 ```yaml
 # config.yaml — 基础默认配置
-APP_ENV: development
-APP_NAME: skillforge
-DEBUG: false
-LOG_LEVEL: INFO
+app:
+  env: development
+  name: skillforge
+  debug: false
+  log_level: INFO
 
-DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
-REDIS_URL: "redis://localhost:6379/0"
-
-DEFAULT_LLM_MODEL: "openai:gpt-4o-mini"
-```
-
-```yaml
-# config.production.yaml — 生产环境覆盖
-APP_ENV: production
-DEBUG: false
-LOG_LEVEL: WARNING
+database:
+  url: "postgresql+asyncpg://postgres:postgres@localhost:5432/skillforge"
+  provider: sqlmodel-pg
 ```
 
 ### .env.local
@@ -542,56 +760,45 @@ SENTRY_DSN=https://key@sentry.io/12345
 
 只需不在项目根目录放 `config.toml` / `config.<env>.toml` 文件即可。系统只加载磁盘上实际存在的文件。
 
-### Q: 配置类声明中没有的字段，配置文件中写了会报错吗？
+### Q: 配置模型未声明的字段，配置文件中写了会报错吗？
 
-不会。基类默认配置了 `extra="ignore"`，未声明的字段会被安静忽略。
+不会。`ConfigStore.load()` 使用 `from_dict(ignore_extra_fields=True)`，未声明的字段会被安静忽略。
 
 ### Q: 如何在测试中覆盖配置？
 
-可以通过构造函数参数直接传入（`init_settings` 优先级最高）：
+直接传入嵌套字典构造模型：
 
 ```python
-settings = AppSettings(DATABASE_URL="sqlite+aiosqlite:///test.db")
+settings = AppConfig.from_dict({"database": {"url": "sqlite+aiosqlite:///test.db"}})
 ```
 
-或设置环境变量：
+或使用 monkeypatch 设置环境变量后通过 ConfigStore 加载：
 
 ```python
-import os
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///test.db"
-settings = AppSettings()
+monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///test.db")
+settings = store.load(AppConfig)
 ```
-
-### Q: 从旧的 `layered_settings` 模块迁移需要改什么？
-
-将导入路径从：
-
-```python
-from aha_common_utils.layered_settings import SecureBaseSettings
-```
-
-改为：
-
-```python
-from aha_common_utils.settings import SecureBaseSettings
-```
-
-旧路径仍可用但已废弃，未来版本将移除。
 
 ### Q: 如何自定义项目根目录？
 
-使用 `build_toml_config_files` / `build_yaml_config_files` 的 `base_dir` 参数：
+使用 `ConfigStore.load()` 的 `base_dir` 参数：
 
 ```python
-from pathlib import Path
-from aha_common_utils.settings import build_toml_config_files
-
-files = build_toml_config_files(base_dir=Path("/custom/path"))
+store = ConfigStore()
+config = store.load(AppConfig, base_dir=Path("/custom/path"))
 ```
 
-### Q: pydantic-settings 版本要求？
+### Q: 从 SecureBaseSettings 迁移需要改什么？
 
-需要 `pydantic-settings >= 2.7.0`，因为 `YamlConfigSettingsSource` 是在该版本引入的。项目 `pyproject.toml` 中已声明此依赖。
+参见上方 [从 SecureBaseSettings 迁移](#从-securebasesettings-迁移) 章节，包含完整的 5 步迁移指南和导入路径对照表。
+
+### Q: `${env:VAR}` 插值在哪些地方生效？
+
+在 TOML/YAML 配置文件的任意字符串值中均可使用。ConfigStore 在解析文件后、构造模型前统一解析所有 `${env:VAR:-default}` 引用。如果环境变量未设置且无默认值，会抛出 `ValueError`。
+
+### Q: BaseParameters 支持 pydantic v2 的所有校验功能吗？
+
+**支持。** `BaseParameters` 是 `pydantic.BaseModel` 的直接子类，支持所有 pydantic v2 特性：类型强制、`Field(ge=0, le=100)` 约束、`@model_validator`、`@field_validator`、`Annotated` 类型等。
 
 ---
 
@@ -614,7 +821,6 @@ from aha_common_utils.cli import CliApp, Router, Opt, Arg, EnvOpt, SecretOpt, Fl
 
 app = CliApp(name="myapp", help="示例应用", no_args_is_help=True)
 
-# ── 子命令组（对应 FastAPI 的 APIRouter） ─────────────────
 db = Router(name="db", help="数据库命令")
 
 @db.command("upgrade")
@@ -623,7 +829,6 @@ async def db_upgrade(
     dry_run: Annotated[bool, FlagOpt(help="仅预览变更", short="-n")] = False,
 ):
     """升级数据库 schema。"""
-    result = await do_migration(url, dry_run=dry_run)
     ...
 
 @db.command("init")
@@ -633,15 +838,13 @@ def db_init(
     """初始化数据库。"""
     ...
 
-app.include_router(db)   # 挂载子命令组
+app.include_router(db)
 
-# ── 顶层命令 ──────────────────────────────────────────────
 @app.command("serve")
 def serve(
     host: Annotated[str, Opt(help="绑定地址", envvar="HOST")] = "0.0.0.0",
     port: Annotated[int, Opt(help="端口号", short="-p")] = 8080,
     verbose: Annotated[bool, FlagOpt(help="详细输出", short="-v")] = False,
-    name: Annotated[str, Arg(help="服务名称")],
 ):
     """启动服务。"""
     ...
@@ -653,185 +856,82 @@ if __name__ == "__main__":
 产生的 CLI 命令：
 
 ```
-myapp serve NAME [--host TEXT] [-p INT] [--verbose / --no-verbose] [-v]
+myapp serve NAME [--host TEXT] [-p INT] [-v | --no-verbose]
 myapp db upgrade [--url / $DATABASE_URL] [--dry-run / -n]
 myapp db init                    # 交互式密码输入 或 $DB_PASSWORD
 ```
 
----
-
 ### 参数助手 API
-
-所有助手函数直接返回 typer 的 `OptionInfo` / `ArgumentInfo`，可用于 `Annotated[T, XxxOpt(...)]`。
 
 #### `Opt` — 通用选项
 
 ```python
-from aha_common_utils.cli import Opt
-
 host: Annotated[str, Opt(
     help="绑定地址",
     envvar="HOST",       # 从环境变量读取
     short="-H",          # 短选项
     show_default=True,
-    hidden=False,
 )] = "0.0.0.0"
 ```
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `help` | `str` | 帮助文本 |
-| `envvar` | `str \| list[str] \| None` | 绑定的环境变量名 |
-| `short` | `str \| None` | 短选项，如 `"-p"`、`"-H"` |
-| `show_default` | `bool` | 是否在 help 中展示默认值 |
-| `hidden` | `bool` | 是否在 --help 中隐藏 |
-| `prompt` | `bool \| str` | 是否交互提示输入 |
-| `metavar` | `str \| None` | usage 行中的值占位符 |
 
 #### `Arg` — 位置参数
 
 ```python
-from aha_common_utils.cli import Arg
-
 name: Annotated[str, Arg(help="服务名称")]
 ```
 
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `help` | `str` | 帮助文本 |
-| `metavar` | `str \| None` | usage 行中的占位符 |
-| `show_default` | `bool` | 是否展示默认值 |
-| `hidden` | `bool` | 是否在 --help 中隐藏 |
-
 #### `EnvOpt` — 环境变量绑定选项
 
-第一个位置参数为环境变量名，语义比 `Opt(envvar=...)` 更清晰。
-
 ```python
-from aha_common_utils.cli import EnvOpt
-
 url: Annotated[str, EnvOpt("DATABASE_URL", help="数据库连接 URL")]
-api_key: Annotated[str, EnvOpt("LLM_API_KEY", help="LLM API Key", short="-k")] = ""
 ```
 
 #### `SecretOpt` — 密码/密钥选项
 
-自动启用 `hide_input=True`。若设置了 `envvar`，环境变量有值时跳过交互提示；无值时进入交互输入（输入内容不显示）。
-
 ```python
-from aha_common_utils.cli import SecretOpt
-
 password: Annotated[str, SecretOpt(
     help="数据库密码",
-    envvar="DB_PASSWORD",       # 有环境变量时不提示
-    confirmation_prompt=True,  # 要求二次确认
+    envvar="DB_PASSWORD",
+    confirmation_prompt=True,
 )]
 ```
 
 #### `FlagOpt` — 布尔开关
 
-专为 `bool` 类型设计，typer 自动生成 `--flag / --no-flag` 对。提供 `short` 时追加为短选项（对应正向值）。
-
 ```python
-from aha_common_utils.cli import FlagOpt
-
 verbose: Annotated[bool, FlagOpt(help="详细输出", short="-v")] = False
-dry_run: Annotated[bool, FlagOpt(help="仅预览", short="-n")] = False
 ```
-
----
 
 ### `CliApp` API
 
 ```python
-from aha_common_utils.cli import CliApp
-
 app = CliApp(
-    name="myapp",           # CLI 程序名，显示在 Usage 行
-    help="My application",  # 顶层帮助文本
-    no_args_is_help=True,   # 无参数时打印 help（默认 True）
-    add_completion=True,    # 添加 shell 补全命令（默认 True）
+    name="myapp",
+    help="My application",
+    no_args_is_help=True,
+    add_completion=True,
 )
 ```
 
 | 方法 | 说明 |
 |---|---|
-| `.command(name, *, help, deprecated, hidden)` | 注册顶层命令，支持 `async def` |
-| `.include_router(router, *, prefix, help, deprecated)` | 挂载子命令组 |
-| `.callback(*, invoke_without_command, no_args_is_help)` | 注册顶层全局选项（如 `--version`） |
-| `.run(args=None)` | 启动 CLI；`args=None` 时读取 `sys.argv`，测试时可显式传参 |
-
-**添加全局 `--version` 标志示例：**
-
-```python
-import typer
-
-@app.callback()
-def main(version: Annotated[bool, FlagOpt(help="显示版本号")] = False):
-    if version:
-        typer.echo("1.0.0")
-        raise typer.Exit()
-```
-
----
+| `.command(name)` | 注册顶层命令，支持 `async def` |
+| `.include_router(router)` | 挂载子命令组 |
+| `.callback()` | 注册顶层全局选项 |
+| `.run(args=None)` | 启动 CLI |
 
 ### `Router` API
 
 ```python
-from aha_common_utils.cli import Router
-
-db = Router(
-    name="db",            # 子命令组名称，用作 CLI 前缀
-    help="数据库命令",     # 显示在顶层 --help 的子命令列表中
-    no_args_is_help=True, # 默认 True
-)
+db = Router(name="db", help="数据库命令")
 ```
 
 | 方法 | 说明 |
 |---|---|
-| `.command(name, *, help, deprecated, hidden)` | 注册子命令，支持 `async def` |
-| `.callback(*, invoke_without_command, no_args_is_help)` | 组级共享选项（任意子命令执行前调用） |
-
-**组级共享选项示例（为整组命令添加 `--verbose`）：**
-
-```python
-@db.callback()
-def db_common(
-    verbose: Annotated[bool, FlagOpt(help="详细输出", short="-v")] = False,
-):
-    if verbose:
-        typer.echo("Verbose mode enabled")
-```
-
----
-
-### async def 支持
-
-`@app.command()` 和 `@router.command()` 内部会自动检测函数是否为协程函数（`async def`）。若是，则用 `asyncio.run` 包装为同步函数后注册到 typer。
-
-**规则：**
-
-- 使用 `async def` 定义命令函数 → 框架自动包装，无需手动调用 `asyncio.run`
-- 使用 `def` 定义命令函数 → 直接注册，无额外开销
-- 两种方式可以在同一个 `CliApp` 或 `Router` 中混用
-
-```python
-@app.command("async-cmd")
-async def async_command(name: Annotated[str, Arg(help="名称")]):
-    result = await some_async_operation(name)   # 直接 await
-    typer.echo(result)
-
-@app.command("sync-cmd")
-def sync_command(name: Annotated[str, Arg(help="名称")]):
-    result = some_sync_operation(name)
-    typer.echo(result)
-```
-
----
+| `.command(name)` | 注册子命令，支持 `async def` |
+| `.callback()` | 组级共享选项 |
 
 ### 测试 CLI 命令
-
-使用 `app.run(args=[...])` 显式传入参数列表，配合 [typer.testing.CliRunner](https://typer.tiangolo.com/tutorial/testing/) 进行单元测试：
 
 ```python
 from typer.testing import CliRunner
@@ -840,11 +940,6 @@ runner = CliRunner()
 
 def test_serve():
     result = runner.invoke(app._typer, ["serve", "myapp", "--port", "9000"])
-    assert result.exit_code == 0
-    assert "myapp" in result.output
-
-def test_db_upgrade_dry_run():
-    result = runner.invoke(app._typer, ["db", "upgrade", "--dry-run"])
     assert result.exit_code == 0
 ```
 
