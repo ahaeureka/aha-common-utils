@@ -6,7 +6,7 @@
 
 import inspect
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type, get_args, get_origin, get_type_hints
+from typing import Any, get_args, get_origin, get_type_hints
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -17,7 +17,7 @@ from .param_metadata import ParamMeta
 logger = get_logger(__name__)
 
 
-def _find_env_files() -> List[Path]:
+def _find_env_files() -> list[Path]:
     """（已废弃）递归查找所有 .env 文件。
 
     请改用 ``aha_common_utils.config_store.ConfigStore``。
@@ -49,7 +49,7 @@ class ParamScanner:
     """参数扫描器 - 扫描类的 __init__ 参数"""
 
     @staticmethod
-    def scan_init_params(cls: Type) -> Dict[str, Dict[str, Any]]:
+    def scan_init_params(cls: type) -> dict[str, dict[str, Any]]:
         """扫描类的 __init__ 参数（仅扫描带 ParamMeta 注解的配置参数）
 
         Args:
@@ -121,7 +121,7 @@ class ParamScanner:
         return params_info
 
     @staticmethod
-    def scan_all_params(cls: Type) -> Dict[str, Dict[str, Any]]:
+    def scan_all_params(cls: type) -> dict[str, dict[str, Any]]:
         """扫描类的 __init__ 方法的所有参数（包括依赖注入参数）
 
         与 scan_init_params 不同，此方法扫描所有参数，不过滤 ParamMeta。
@@ -185,7 +185,7 @@ class ParamScanner:
         return params_info
 
     @staticmethod
-    def _extract_type_and_meta(annotation: Any) -> tuple[Any, Optional[ParamMeta]]:
+    def _extract_type_and_meta(annotation: Any) -> tuple[Any, ParamMeta | None]:
         """从类型注解中提取类型和 ParamMeta
 
         Args:
@@ -222,8 +222,8 @@ class ConfigClassGenerator:
     def generate_config_class(
         provider_name: str,
         config_path: str,
-        params_info: Dict[str, Dict[str, Any]],
-    ) -> Type[BaseSettings]:
+        params_info: dict[str, dict[str, Any]],
+    ) -> type[BaseSettings]:
         """生成 pydantic BaseSettings 配置类
 
         Args:
@@ -315,8 +315,8 @@ class ConfigClassGenerator:
     @staticmethod
     def generate_nested_config(
         config_path: str,
-        params_info: Dict[str, Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        params_info: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
         """生成嵌套配置字典（用于 YAML/TOML）
 
         Args:

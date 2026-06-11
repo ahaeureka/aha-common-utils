@@ -22,7 +22,7 @@ Example:
 """
 
 import inspect
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from .logging import get_logger
 from .register import ProviderRegistry
@@ -41,15 +41,15 @@ class DependencyInjector:
     def __init__(self):
         """初始化依赖注入容器"""
         # provider 配置: base_class_name -> (provider_name, config_override)
-        self._provider_config: Dict[str, tuple] = {}
+        self._provider_config: dict[str, tuple] = {}
 
         # 实例缓存: (base_class, provider_name) -> instance
-        self._instance_cache: Dict[tuple, Any] = {}
+        self._instance_cache: dict[tuple, Any] = {}
 
         # 依赖解析栈，用于检测循环依赖
-        self._resolution_stack: List[str] = []
+        self._resolution_stack: list[str] = []
 
-    def configure(self, provider_key: str, provider_name: str, config_override: Optional[Dict[str, Any]] = None):
+    def configure(self, provider_key: str, provider_name: str, config_override: dict[str, Any] | None = None):
         """配置 provider
 
         Args:
@@ -92,7 +92,7 @@ class DependencyInjector:
             f"provider={provider_name}, config_keys={list((config_override or {}).keys())}"
         )
 
-    def _infer_base_class_name(self, provider_name: str) -> Optional[str]:
+    def _infer_base_class_name(self, provider_name: str) -> str | None:
         """从 ProviderRegistry 查询 provider 对应的基类名称
 
         无需硬编码，直接使用注册时自动提取的基类信息。
@@ -108,7 +108,7 @@ class DependencyInjector:
             logger.debug(f"[DependencyInjector] Found mapping: {provider_name} -> {base_class_name}")
         return base_class_name
 
-    def get(self, base_class: Type[T], provider_name: Optional[str] = None, **extra_kwargs) -> T:
+    def get(self, base_class: type[T], provider_name: str | None = None, **extra_kwargs) -> T:
         """获取组件实例（自动解析依赖）
 
         Args:
@@ -163,7 +163,7 @@ class DependencyInjector:
         finally:
             self._resolution_stack.pop()
 
-    def _create_instance(self, base_class: Type[T], provider_name: str, extra_kwargs: Dict[str, Any]) -> T:
+    def _create_instance(self, base_class: type[T], provider_name: str, extra_kwargs: dict[str, Any]) -> T:
         """创建实例（自动解析依赖）
 
         Args:
@@ -271,7 +271,7 @@ class DependencyInjector:
 
         return is_dependency
 
-    def _resolve_dependency(self, dependency_type: Type) -> Any:
+    def _resolve_dependency(self, dependency_type: type) -> Any:
         """解析依赖类型
 
         Args:
@@ -294,7 +294,7 @@ class DependencyInjector:
         # 递归调用 get() 解析依赖
         return self.get(dependency_type)
 
-    def _find_default_provider(self, base_class: Type) -> Optional[Any]:
+    def _find_default_provider(self, base_class: type) -> Any | None:
         """查找默认 provider（用于未配置的依赖）
 
         Args:
@@ -325,7 +325,7 @@ class DependencyInjector:
         self._instance_cache.clear()
         logger.debug("[DependencyInjector] Cache cleared")
 
-    def get_cached_instances(self) -> Dict[str, Any]:
+    def get_cached_instances(self) -> dict[str, Any]:
         """获取所有缓存的实例
 
         Returns:

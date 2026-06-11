@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,15 +41,15 @@ class ConfigLoader:
 
     def __init__(
         self,
-        env_file: Optional[str | Path] = None,
-        toml_file: Optional[str | Path] = None,
-        yaml_file: Optional[str | Path] = None,
-        json_file: Optional[str | Path] = None,
-        config_files: Optional[list[str | Path]] = None,
-        toml_files: Optional[list[str | Path]] = None,
-        yaml_files: Optional[list[str | Path]] = None,
-        json_files: Optional[list[str | Path]] = None,
-        provider_modules: Optional[list[str]] = None,
+        env_file: str | Path | None = None,
+        toml_file: str | Path | None = None,
+        yaml_file: str | Path | None = None,
+        json_file: str | Path | None = None,
+        config_files: list[str | Path] | None = None,
+        toml_files: list[str | Path] | None = None,
+        yaml_files: list[str | Path] | None = None,
+        json_files: list[str | Path] | None = None,
+        provider_modules: list[str] | None = None,
     ):
         """初始化配置加载器
 
@@ -75,8 +75,8 @@ class ConfigLoader:
     def load(
         self,
         recursive_env: bool = True,
-        start_path: Optional[Path] = None,
-        config_overrides: Optional[Dict[str, Any]] = None,
+        start_path: Path | None = None,
+        config_overrides: dict[str, Any] | None = None,
         auto_generate: bool = True,
     ) -> BaseSettings:
         """加载并实例化主配置
@@ -130,8 +130,8 @@ class ConfigLoader:
         self,
         config_name: str,
         recursive_env: bool = True,
-        start_path: Optional[Path] = None,
-        config_overrides: Optional[Dict[str, Any]] = None,
+        start_path: Path | None = None,
+        config_overrides: dict[str, Any] | None = None,
     ) -> BaseSettings:
         """加载并实例化指定的配置类
 
@@ -170,7 +170,7 @@ class ConfigLoader:
             return DynamicSettings(**config_overrides)
         return DynamicSettings()
 
-    def _ensure_providers_imported(self, modules: Optional[list[str]] = None):
+    def _ensure_providers_imported(self, modules: list[str] | None = None):
         """确保所有 provider 被导入（触发装饰器执行）
 
         Args:
@@ -237,8 +237,8 @@ class ConfigLoader:
             has_provider_registry = False
 
         # 收集所有配置字段
-        fields: Dict[str, Any] = {}
-        annotations: Dict[str, Any] = {}
+        fields: dict[str, Any] = {}
+        annotations: dict[str, Any] = {}
 
         # 1. 添加基础应用配置
         annotations["app_name"] = str
@@ -255,7 +255,7 @@ class ConfigLoader:
             if metadata.get("is_main"):
                 continue  # 跳过主配置标记
             # 使用 Dict 而不是嵌套配置类，避免 pydantic-settings 冲突
-            annotations[config_name] = Dict[str, Any]
+            annotations[config_name] = dict[str, Any]
             fields[config_name] = Field(default_factory=dict, description=metadata.get("description", ""))
 
         # 3. 从 ProviderRegistry 收集自动生成的配置类
@@ -264,7 +264,7 @@ class ConfigLoader:
             provider_groups = ProviderRegistry.get_all_provider_groups()
 
             # 按配置名称分组 provider
-            configs_by_group: Dict[str, Dict[str, type]] = {}
+            configs_by_group: dict[str, dict[str, type]] = {}
 
             for provider_name in ProviderRegistry.available_providers():
                 config_cls = ProviderRegistry.get_config_class(provider_name)
@@ -284,7 +284,7 @@ class ConfigLoader:
             for config_name in configs_by_group:
                 if config_name not in annotations:  # 避免覆盖已注册的配置
                     # 添加 {config_name} 字段（包含 provider 和所有 provider 的配置）
-                    annotations[config_name] = Dict[str, Any]
+                    annotations[config_name] = dict[str, Any]
                     fields[config_name] = Field(default_factory=dict, description=f"{config_name} 配置")
 
         # 4. 动态创建主配置类
@@ -307,8 +307,8 @@ class ConfigLoader:
     def _build_config_dict(
         self,
         recursive_env: bool,
-        start_path: Optional[Path],
-    ) -> Dict[str, Any]:
+        start_path: Path | None,
+    ) -> dict[str, Any]:
         """构建 pydantic-settings 配置字典
 
         Args:
@@ -318,7 +318,7 @@ class ConfigLoader:
         Returns:
             配置字典
         """
-        config_dict: Dict[str, Any] = {
+        config_dict: dict[str, Any] = {
             "case_sensitive": False,
             "env_nested_delimiter": "__",
         }
@@ -376,7 +376,7 @@ class ConfigLoader:
                 pass
         return _merge(*all_data) if all_data else {}
 
-    def list_registered_configs(self) -> Dict[str, Dict[str, Any]]:
+    def list_registered_configs(self) -> dict[str, dict[str, Any]]:
         """列出所有已注册的配置
 
         Returns:
@@ -384,7 +384,7 @@ class ConfigLoader:
         """
         return self._registry.list_configs()
 
-    def get_main_config_info(self) -> Optional[Dict[str, Any]]:
+    def get_main_config_info(self) -> dict[str, Any] | None:
         """获取主配置信息
 
         Returns:
@@ -399,15 +399,15 @@ class ConfigLoader:
 
 # 便捷函数
 def load_config(
-    env_file: Optional[str | Path] = None,
-    toml_file: Optional[str | Path] = None,
-    yaml_file: Optional[str | Path] = None,
-    json_file: Optional[str | Path] = None,
+    env_file: str | Path | None = None,
+    toml_file: str | Path | None = None,
+    yaml_file: str | Path | None = None,
+    json_file: str | Path | None = None,
     recursive_env: bool = True,
-    start_path: Optional[Path] = None,
-    config_overrides: Optional[Dict[str, Any]] = None,
+    start_path: Path | None = None,
+    config_overrides: dict[str, Any] | None = None,
     auto_generate: bool = True,
-    provider_modules: Optional[list[str]] = None,
+    provider_modules: list[str] | None = None,
 ) -> BaseSettings:
     """便捷函数：快速加载主配置
 
@@ -460,8 +460,8 @@ def load_config(
 
 def load_config_file(
     config_file: str,
-    env_file: Optional[str | Path] = None,
-    provider_modules: Optional[list[str]] = None,
+    env_file: str | Path | None = None,
+    provider_modules: list[str] | None = None,
 ) -> BaseSettings:
     """便捷函数：根据配置文件路径加载主配置
 

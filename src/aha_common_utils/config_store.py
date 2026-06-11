@@ -477,7 +477,7 @@ class ConfigStore:
         if suffix in (".yaml", ".yml"):
             import yaml
 
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         if suffix == ".toml":
             import tomli
@@ -485,7 +485,7 @@ class ConfigStore:
             with open(path, "rb") as f:
                 return tomli.load(f)
         if suffix == ".json":
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return _json.load(f)
         raise ValueError(f"Unsupported config file format: {suffix}")
 

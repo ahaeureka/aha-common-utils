@@ -19,7 +19,6 @@ This allows for:
 
 import threading
 import time
-from typing import Optional
 
 
 class SnowflakeIDGenerator:
@@ -54,7 +53,7 @@ class SnowflakeIDGenerator:
         self,
         data_center_id: int = 0,
         worker_id: int = 0,
-        epoch: Optional[int] = None
+        epoch: int | None = None
     ):
         """
         Initialize Snowflake ID generator.
@@ -209,14 +208,14 @@ class SnowflakeIDGenerator:
 
 
 # Global default instance
-_default_generator: Optional[SnowflakeIDGenerator] = None
+_default_generator: SnowflakeIDGenerator | None = None
 _generator_lock = threading.Lock()
 
 
 def get_default_generator(
     data_center_id: int = 0,
     worker_id: int = 0,
-    epoch: Optional[int] = None
+    epoch: int | None = None
 ) -> SnowflakeIDGenerator:
     """
     Get or create the default global Snowflake ID generator.

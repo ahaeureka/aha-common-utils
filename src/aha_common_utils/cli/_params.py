@@ -6,7 +6,8 @@ OptionInfo / ArgumentInfo 对象，可直接用于 Annotated[T, Opt(...)] 语法
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import typer
 

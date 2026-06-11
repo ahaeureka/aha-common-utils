@@ -2,7 +2,8 @@
 
 提供类似 FastAPI 的 Annotated[type, ParamMeta(...)] 机制，用于定义参数的描述、约束和验证规则。
 """
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 
 class ParamMeta:
@@ -26,28 +27,28 @@ class ParamMeta:
         self,
         default: Any = ...,
         *,
-        description: Optional[str] = None,
-        title: Optional[str] = None,
+        description: str | None = None,
+        title: str | None = None,
         # 数值约束
-        gt: Optional[Union[int, float]] = None,  # 大于
-        ge: Optional[Union[int, float]] = None,  # 大于等于
-        lt: Optional[Union[int, float]] = None,  # 小于
-        le: Optional[Union[int, float]] = None,  # 小于等于
-        multiple_of: Optional[Union[int, float]] = None,  # 倍数
+        gt: int | float | None = None,  # 大于
+        ge: int | float | None = None,  # 大于等于
+        lt: int | float | None = None,  # 小于
+        le: int | float | None = None,  # 小于等于
+        multiple_of: int | float | None = None,  # 倍数
         # 字符串约束
-        min_length: Optional[int] = None,
-        max_length: Optional[int] = None,
-        pattern: Optional[str] = None,  # 正则表达式
+        min_length: int | None = None,
+        max_length: int | None = None,
+        pattern: str | None = None,  # 正则表达式
         # 集合约束
-        min_items: Optional[int] = None,
-        max_items: Optional[int] = None,
+        min_items: int | None = None,
+        max_items: int | None = None,
         # 通用约束
-        const: Optional[Any] = None,  # 固定值
-        enum: Optional[list] = None,  # 枚举值
+        const: Any | None = None,  # 固定值
+        enum: list | None = None,  # 枚举值
         # 自定义验证
-        validator: Optional[Callable[[Any], bool]] = None,
+        validator: Callable[[Any], bool] | None = None,
         # 其他元数据
-        examples: Optional[list] = None,
+        examples: list | None = None,
         deprecated: bool = False,
         **extra: Any,
     ):

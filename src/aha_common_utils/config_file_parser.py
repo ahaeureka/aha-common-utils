@@ -12,7 +12,7 @@
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from .logging import get_logger
 
@@ -21,7 +21,7 @@ T = TypeVar("T")
 logger = get_logger(__name__)
 
 
-def parse_config_file(config_file: str | Path) -> Dict[str, Any]:
+def parse_config_file(config_file: str | Path) -> dict[str, Any]:
     """解析配置文件
 
     Args:
@@ -57,7 +57,7 @@ def parse_config_file(config_file: str | Path) -> Dict[str, Any]:
         raise ValueError(f"Unsupported config file format: {suffix}. Supported: .yaml, .yml, .toml, .json")
 
 
-def extract_nested_config(config_data: Dict[str, Any], config_path: str) -> Dict[str, Any]:
+def extract_nested_config(config_data: dict[str, Any], config_path: str) -> dict[str, Any]:
     """从配置字典中提取嵌套配置
 
     根据点分隔的路径提取配置，如 "cache.diskcache" 会提取
@@ -90,7 +90,7 @@ def extract_nested_config(config_data: Dict[str, Any], config_path: str) -> Dict
     return result
 
 
-def load_config_section(config_file: str | Path, config_path: str) -> Dict[str, Any]:
+def load_config_section(config_file: str | Path, config_path: str) -> dict[str, Any]:
     """加载配置文件中的指定配置段
 
     组合了 parse_config_file 和 extract_nested_config 的功能。
@@ -113,18 +113,18 @@ def load_config_section(config_file: str | Path, config_path: str) -> Dict[str, 
     return extract_nested_config(config_data, config_path)
 
 
-def _parse_yaml(config_file: str | Path) -> Dict[str, Any]:
+def _parse_yaml(config_file: str | Path) -> dict[str, Any]:
     """解析 YAML 配置文件"""
     try:
         import yaml
 
-        with open(config_file, "r", encoding="utf-8") as f:
+        with open(config_file, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except ImportError as exc:
         raise ValueError("PyYAML is not installed. Install it with: pip install pyyaml") from exc
 
 
-def _parse_toml(config_file: str | Path) -> Dict[str, Any]:
+def _parse_toml(config_file: str | Path) -> dict[str, Any]:
     """解析 TOML 配置文件"""
     try:
         import tomli
@@ -135,17 +135,17 @@ def _parse_toml(config_file: str | Path) -> Dict[str, Any]:
         try:
             import toml
 
-            with open(config_file, "r", encoding="utf-8") as f:
+            with open(config_file, encoding="utf-8") as f:
                 return toml.load(f)
         except ImportError as exc:
             raise ValueError("TOML parser not installed. Install with: pip install tomli (or toml)") from exc
 
 
-def _parse_json(config_file: str | Path) -> Dict[str, Any]:
+def _parse_json(config_file: str | Path) -> dict[str, Any]:
     """解析 JSON 配置文件"""
     import json
 
-    with open(config_file, "r", encoding="utf-8") as f:
+    with open(config_file, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -154,7 +154,7 @@ def _parse_json(config_file: str | Path) -> Dict[str, Any]:
 # ============================================================================
 
 
-def load_env_file(env_file: Optional[Path] = None, override: bool = False) -> None:
+def load_env_file(env_file: Path | None = None, override: bool = False) -> None:
     """加载 .env 文件到环境变量
 
     Args:
@@ -195,7 +195,7 @@ def _simple_load_env(env_file: Path, override: bool = False) -> None:
         env_file: .env 文件路径
         override: 是否覆盖已存在的环境变量
     """
-    with open(env_file, "r", encoding="utf-8") as f:
+    with open(env_file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             # 跳过注释和空行
@@ -220,7 +220,7 @@ def get_env_with_prefix(
     prefix: str,
     case_sensitive: bool = False,
     strip_prefix: bool = True,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """获取带指定前缀的环境变量
 
     Args:
@@ -375,7 +375,7 @@ def env_key_to_config_path(env_key: str, separator: str = "__") -> str:
     return ".".join(normalized_parts)
 
 
-def set_nested_value(config: Dict[str, Any], path: str, value: Any) -> None:
+def set_nested_value(config: dict[str, Any], path: str, value: Any) -> None:
     """设置嵌套字典中的值
 
     Args:
@@ -405,10 +405,10 @@ def set_nested_value(config: Dict[str, Any], path: str, value: Any) -> None:
 
 
 def apply_env_to_config(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     env_prefix: str,
     case_sensitive: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """将环境变量应用到配置字典(支持嵌套路径)
 
     Args:
@@ -471,10 +471,10 @@ def apply_env_to_config(
 def create_settings_class(
     class_name: str,
     config_path: str,
-    fields_spec: Dict[str, Any],
+    fields_spec: dict[str, Any],
     env_prefix: str = "",
     case_sensitive: bool = False,
-) -> Type:
+) -> type:
     """动态创建 pydantic BaseSettings 配置类
 
     Args:
@@ -541,12 +541,12 @@ def create_settings_class(
 
 
 def load_config_with_env(
-    config_file: Optional[Path] = None,
-    config_path: Optional[str] = None,
-    env_file: Optional[Path] = None,
+    config_file: Path | None = None,
+    config_path: str | None = None,
+    env_file: Path | None = None,
     env_prefix: str = "",
     case_sensitive: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """加载配置文件并应用环境变量覆盖
 
     Args:
@@ -596,7 +596,7 @@ def read_config(
     config_file: str | Path,
     *,
     path: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """统一读入口。根据扩展名自动选择解析器。
 
     Args:
@@ -636,7 +636,7 @@ def read_config(
 
 
 def write_config(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     config_file: str | Path,
     *,
     path: str | None = None,
@@ -682,7 +682,7 @@ def write_config(
         raise ValueError(f"Unsupported format: {suffix}. Supported: yaml, yml, toml, json, ini, cfg, env")
 
 
-def merge_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
+def merge_configs(*configs: dict[str, Any]) -> dict[str, Any]:
     """深度合并多个配置字典。后者覆盖前者。嵌套 dict 递归合并。
 
     Returns:
@@ -691,13 +691,13 @@ def merge_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
     if not configs:
         return {}
 
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for config in configs:
         _deep_merge(merged, config)
     return merged
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
     """递归地将 override 合并到 base 中（就地修改）。"""
     for key, value in override.items():
         if key in base and isinstance(base[key], dict) and isinstance(value, dict):
@@ -711,13 +711,13 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
 # ============================================================================
 
 
-def _parse_ini(config_file: str | Path) -> Dict[str, Any]:
+def _parse_ini(config_file: str | Path) -> dict[str, Any]:
     """解析 INI 配置文件，section 名中的 . 映射为嵌套 dict。"""
     import configparser
 
     parser = configparser.ConfigParser()
     parser.read(str(config_file), encoding="utf-8")
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     for section in parser.sections():
         current = result
         parts = section.split(".")
@@ -727,7 +727,7 @@ def _parse_ini(config_file: str | Path) -> Dict[str, Any]:
     return result
 
 
-def _write_ini(config_file: str | Path, data: Dict[str, Any]) -> None:
+def _write_ini(config_file: str | Path, data: dict[str, Any]) -> None:
     """将嵌套 dict 写入 INI 文件，嵌套路径展平为 . 分隔的 section 名。"""
     import configparser
 
@@ -739,7 +739,7 @@ def _write_ini(config_file: str | Path, data: Dict[str, Any]) -> None:
 
 def _flatten_ini_sections(
     parser: Any,
-    data: Dict[str, Any],
+    data: dict[str, Any],
     prefix: str,
 ) -> None:
     """递归展平嵌套 dict 为 INI section。"""
@@ -755,10 +755,10 @@ def _flatten_ini_sections(
             parser[section][key] = str(value)
 
 
-def _parse_env_to_dict(config_file: str | Path) -> Dict[str, Any]:
+def _parse_env_to_dict(config_file: str | Path) -> dict[str, Any]:
     """解析 .env 文件为 dict，__ 映射为嵌套路径。"""
-    result: Dict[str, Any] = {}
-    with open(config_file, "r", encoding="utf-8") as f:
+    result: dict[str, Any] = {}
+    with open(config_file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -774,7 +774,7 @@ def _parse_env_to_dict(config_file: str | Path) -> Dict[str, Any]:
     return result
 
 
-def _write_env_file(config_file: str | Path, data: Dict[str, Any]) -> None:
+def _write_env_file(config_file: str | Path, data: dict[str, Any]) -> None:
     """将扁平 dict 写入 .env 文件，嵌套 key 用 __ 分隔。"""
     lines = []
     for key, value in data.items():
@@ -789,7 +789,7 @@ def _write_env_file(config_file: str | Path, data: Dict[str, Any]) -> None:
         f.write("\n".join(lines) + "\n")
 
 
-def _flatten_env(data: Dict[str, Any], prefix: str) -> list[tuple[str, str]]:
+def _flatten_env(data: dict[str, Any], prefix: str) -> list[tuple[str, str]]:
     """将嵌套 dict 展平为 (KEY, VALUE) 列表，用 __ 分隔层级。"""
     result = []
     for key, value in data.items():
@@ -801,14 +801,14 @@ def _flatten_env(data: Dict[str, Any], prefix: str) -> list[tuple[str, str]]:
     return result
 
 
-def _write_yaml(config_file: str | Path, data: Dict[str, Any]) -> None:
+def _write_yaml(config_file: str | Path, data: dict[str, Any]) -> None:
     import yaml
 
     with open(config_file, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
-def _write_toml(config_file: str | Path, data: Dict[str, Any]) -> None:
+def _write_toml(config_file: str | Path, data: dict[str, Any]) -> None:
     try:
         import tomli_w
     except ImportError:
@@ -817,7 +817,7 @@ def _write_toml(config_file: str | Path, data: Dict[str, Any]) -> None:
         tomli_w.dump(data, f)
 
 
-def _write_json(config_file: str | Path, data: Dict[str, Any]) -> None:
+def _write_json(config_file: str | Path, data: dict[str, Any]) -> None:
     import json as _json
 
     with open(config_file, "w", encoding="utf-8") as f:

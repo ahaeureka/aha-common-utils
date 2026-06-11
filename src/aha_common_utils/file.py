@@ -6,7 +6,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import List, Literal, Union
+from typing import Literal
 
 import filetype
 import numpy as np
@@ -281,7 +281,7 @@ class FileHelper:
             raise ValueError("Unsupported file type for width and height extraction.")
 
     @staticmethod
-    def get_image(src: Union[str, Image.Image, np.ndarray]) -> Image.Image:
+    def get_image(src: str | Image.Image | np.ndarray) -> Image.Image:
         """
         Convert the input to a format suitable for OCR processing.
 
@@ -318,7 +318,7 @@ class FileHelper:
         raise ValueError(f"Unsupport src type of {type(src)}")
 
     @staticmethod
-    def get_image_np(src: Union[str, Image.Image, np.ndarray]) -> np.ndarray:
+    def get_image_np(src: str | Image.Image | np.ndarray) -> np.ndarray:
         """
         Convert the input to a NumPy array suitable for OCR processing.
         This method can be overridden by subclasses to customize the image conversion process.
@@ -475,7 +475,7 @@ class FileHelper:
 
     @staticmethod
     def get_phash(
-        src: Union[str, Image.Image, np.ndarray],
+        src: str | Image.Image | np.ndarray,
         hash_size: int = 8,
         highfreq_factor: int = 4,
     ) -> str:
@@ -498,7 +498,7 @@ class FileHelper:
         num_frames: int = 8,
         hash_size: int = 8,
         highfreq_factor: int = 4,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Calculate perceptual hashes (pHash) for a video by extracting key frames.
 
@@ -547,7 +547,7 @@ class FileHelper:
         num_frames: int = 8,
         hash_size: int = 8,
         highfreq_factor: int = 4,
-    ) -> Union[str, List[str]]:
+    ) -> str | list[str]:
         """
         Calculate perceptual hash(es) for an image or video file.
 
@@ -658,7 +658,7 @@ class FileHelper:
         return bool(base64_pattern.match(s))
 
     @staticmethod
-    def _simhash_aggregate(values: List[int], hashbits: int = 128) -> int:
+    def _simhash_aggregate(values: list[int], hashbits: int = 128) -> int:
         """
         Aggregate integer values using SimHash algorithm.
 

@@ -6,7 +6,8 @@
 3. 支持嵌套配置和主配置标记
 4. 配置类与加载器解耦
 """
-from typing import Any, Callable, Dict, Optional, Type, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from pydantic_settings import BaseSettings
 
@@ -21,18 +22,18 @@ class ConfigRegistry:
 
     def __init__(self):
         """初始化配置注册表"""
-        self._configs: Dict[str, Type[BaseSettings]] = {}
-        self._main_config: Optional[str] = None
-        self._config_metadata: Dict[str, Dict[str, Any]] = {}
+        self._configs: dict[str, type[BaseSettings]] = {}
+        self._main_config: str | None = None
+        self._config_metadata: dict[str, dict[str, Any]] = {}
 
     def register(
         self,
         name: str,
-        config_class: Type[T],
+        config_class: type[T],
         is_main: bool = False,
-        description: Optional[str] = None,
-        depends_on: Optional[list[str]] = None,
-    ) -> Type[T]:
+        description: str | None = None,
+        depends_on: list[str] | None = None,
+    ) -> type[T]:
         """注册配置类
 
         Args:
@@ -69,7 +70,7 @@ class ConfigRegistry:
 
         return config_class
 
-    def get_config(self, name: str) -> Optional[Type[BaseSettings]]:
+    def get_config(self, name: str) -> type[BaseSettings] | None:
         """获取已注册的配置类
 
         Args:
@@ -80,7 +81,7 @@ class ConfigRegistry:
         """
         return self._configs.get(name)
 
-    def get_main_config(self) -> Optional[Type[BaseSettings]]:
+    def get_main_config(self) -> type[BaseSettings] | None:
         """获取主配置类
 
         Returns:
@@ -90,7 +91,7 @@ class ConfigRegistry:
             return self._configs.get(self._main_config)
         return None
 
-    def get_main_config_name(self) -> Optional[str]:
+    def get_main_config_name(self) -> str | None:
         """获取主配置名称
 
         Returns:
@@ -98,7 +99,7 @@ class ConfigRegistry:
         """
         return self._main_config
 
-    def list_configs(self) -> Dict[str, Dict[str, Any]]:
+    def list_configs(self) -> dict[str, dict[str, Any]]:
         """列出所有已注册的配置
 
         Returns:
@@ -128,9 +129,9 @@ _global_registry = ConfigRegistry()
 def register_config(
     name: str,
     is_main: bool = False,
-    description: Optional[str] = None,
-    depends_on: Optional[list[str]] = None,
-) -> Callable[[Type[T]], Type[T]]:
+    description: str | None = None,
+    depends_on: list[str] | None = None,
+) -> Callable[[type[T]], type[T]]:
     """配置注册装饰器
 
     将配置类注册到全局注册表，支持嵌套配置和主配置标记。
@@ -167,7 +168,7 @@ def register_config(
         ...     database: DatabaseSettings
         ...     llm: LLMSettings
     """
-    def decorator(config_class: Type[T]) -> Type[T]:
+    def decorator(config_class: type[T]) -> type[T]:
         return _global_registry.register(
             name=name,
             config_class=config_class,
@@ -187,7 +188,7 @@ def get_registry() -> ConfigRegistry:
     return _global_registry
 
 
-def get_config_class(name: str) -> Optional[Type[BaseSettings]]:
+def get_config_class(name: str) -> type[BaseSettings] | None:
     """获取已注册的配置类
 
     Args:
@@ -199,7 +200,7 @@ def get_config_class(name: str) -> Optional[Type[BaseSettings]]:
     return _global_registry.get_config(name)
 
 
-def get_main_config_class() -> Optional[Type[BaseSettings]]:
+def get_main_config_class() -> type[BaseSettings] | None:
     """获取主配置类
 
     Returns:

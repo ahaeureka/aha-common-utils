@@ -3,7 +3,8 @@ import multiprocessing
 import multiprocessing.managers
 import multiprocessing.synchronize
 from abc import ABCMeta
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union, cast
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 from .logging import get_logger
 
@@ -19,54 +20,54 @@ class ProviderRegistry:
     """
 
     # 本地注册表: provider_name -> class_type
-    _registry: Dict[str, Type] = {}
+    _registry: dict[str, type] = {}
 
     # 注册信息: provider_name -> (module_path, class_name)
     # 用于在子进程中动态导入
-    _registry_info: Dict[str, Tuple[str, str]] = {}
+    _registry_info: dict[str, tuple[str, str]] = {}
 
     # 单例实例缓存: provider_name -> instance
-    _instances: Dict[str, Any] = {}
+    _instances: dict[str, Any] = {}
     _instance_lock = multiprocessing.Lock()
 
     # 标记哪些 provider 是单例: provider_name -> bool
-    _singleton_flags: Dict[str, bool] = {}
+    _singleton_flags: dict[str, bool] = {}
 
     # 配置路径: provider_name -> config_path (如 "cache.diskcache")
-    _config_paths: Dict[str, str] = {}
+    _config_paths: dict[str, str] = {}
 
     # 配置类缓存: provider_name -> BaseSettings class
-    _config_classes: Dict[str, Type] = {}
+    _config_classes: dict[str, type] = {}
 
     # 参数信息缓存: provider_name -> params_info
-    _params_info: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    _params_info: dict[str, dict[str, dict[str, Any]]] = {}
 
     # 基类映射: provider_name -> base_class_name
     # 在注册时自动提取，用于依赖注入
-    _base_class_mapping: Dict[str, str] = {}
+    _base_class_mapping: dict[str, str] = {}
 
     # Provider 组注册: base_class_name -> config_name
     # 用于管理 provider 组的配置名称
-    _provider_groups: Dict[str, str] = {}
+    _provider_groups: dict[str, str] = {}
 
     # 全局配置文件路径（DEPRECATED: 使用 AppConfig 代替）
-    _global_config_file: Optional[str] = None
+    _global_config_file: str | None = None
 
     # 全局配置数据缓存（从配置文件加载的完整配置）
     # DEPRECATED: 使用 _app_config + AppConfig.model_dump() 实时查询代替
-    _global_config_data: Optional[Dict[str, Any]] = None
+    _global_config_data: dict[str, Any] | None = None
 
     # AppConfig 实例引用（无状态、实时查询，推荐）
     _app_config: Any | None = None
 
     # 多进程共享管理器
-    _manager: Optional[multiprocessing.managers.SyncManager] = None
-    _shared_registry: Optional[Union[Dict[str, tuple], multiprocessing.managers.DictProxy]] = None
-    _lock: Optional[Any] = None
+    _manager: multiprocessing.managers.SyncManager | None = None
+    _shared_registry: dict[str, tuple] | multiprocessing.managers.DictProxy | None = None
+    _lock: Any | None = None
     _multiprocessing_enabled: bool = False
 
     @classmethod
-    def _extract_base_class_name(cls, impl_cls: Type) -> Optional[str]:
+    def _extract_base_class_name(cls, impl_cls: type) -> str | None:
         """从实现类中提取基类名称
 
         通过检查 MRO 找到第一个非标准库的基类（业务基类）。
@@ -129,7 +130,7 @@ class ProviderRegistry:
         return None
 
     @classmethod
-    def get_base_class_for_provider(cls, provider_name: str) -> Optional[str]:
+    def get_base_class_for_provider(cls, provider_name: str) -> str | None:
         """获取 provider 对应的基类名称
 
         Args:
@@ -141,7 +142,7 @@ class ProviderRegistry:
         return cls._base_class_mapping.get(provider_name)
 
     @classmethod
-    def get_providers_for_base_class(cls, base_class_name: str) -> List[str]:
+    def get_providers_for_base_class(cls, base_class_name: str) -> list[str]:
         """获取某个基类的所有 provider 名称（智能类型推断）
 
         从已注册 provider 的 MRO 中动态发现目标基类对象，
@@ -206,7 +207,7 @@ class ProviderRegistry:
         logger.debug(f"[ProviderRegistry] Registered provider group: {base_class_name} -> {config_name}")
 
     @classmethod
-    def get_config_name_for_group(cls, base_class_name: str) -> Optional[str]:
+    def get_config_name_for_group(cls, base_class_name: str) -> str | None:
         """获取 provider 组的配置名称
 
         Args:
@@ -218,7 +219,7 @@ class ProviderRegistry:
         return cls._provider_groups.get(base_class_name)
 
     @classmethod
-    def get_all_provider_groups(cls) -> Dict[str, str]:
+    def get_all_provider_groups(cls) -> dict[str, str]:
         """获取所有已注册的 provider 组
 
         Returns:
@@ -231,8 +232,8 @@ class ProviderRegistry:
         cls,
         name: str,
         singleton: bool = True,
-        config_path: Optional[str] = None,
-    ) -> Callable[[Type[T]], Type[T]]:
+        config_path: str | None = None,
+    ) -> Callable[[type[T]], type[T]]:
         """装饰器：注册实现类
 
         用法:
@@ -264,7 +265,7 @@ class ProviderRegistry:
             装饰器函数
         """
 
-        def decorator(impl_cls: Type[T]) -> Type[T]:
+        def decorator(impl_cls: type[T]) -> type[T]:
             # 注册到本地注册表
             cls._registry[name] = impl_cls
             cls._singleton_flags[name] = singleton
@@ -363,7 +364,7 @@ class ProviderRegistry:
         return cls._multiprocessing_enabled
 
     @classmethod
-    def get(cls, name: str) -> Optional[Type]:
+    def get(cls, name: str) -> type | None:
         """获取已注册的类
 
         Args:
@@ -453,7 +454,7 @@ class ProviderRegistry:
             logger.debug("[ProviderRegistry] Cleared all singleton instances")
 
     @classmethod
-    def _import_class(cls, module_path: str, class_name: str) -> Optional[Type]:
+    def _import_class(cls, module_path: str, class_name: str) -> type | None:
         """动态导入类"""
         try:
             module = __import__(module_path, fromlist=[class_name.split(".")[0]])
@@ -461,13 +462,13 @@ class ProviderRegistry:
             obj = module
             for part in class_name.split("."):
                 obj = getattr(obj, part)
-            return cast(Type, obj)
+            return cast(type, obj)
         except Exception as e:
             logger.error(f"[ProviderRegistry] Import failed: {module_path}.{class_name}: {e}")
             return None
 
     @classmethod
-    def get_all(cls) -> Dict[str, Type]:
+    def get_all(cls) -> dict[str, type]:
         """获取所有已注册的类"""
         result = dict(cls._registry)
 
@@ -485,7 +486,7 @@ class ProviderRegistry:
         return result
 
     @classmethod
-    def available_providers(cls) -> List[str]:
+    def available_providers(cls) -> list[str]:
         """获取所有可用的 provider 名称"""
         names = set(cls._registry.keys())
         if cls._multiprocessing_enabled and cls._shared_registry is not None:
@@ -527,7 +528,7 @@ class ProviderRegistry:
             cls._global_config_data = None
 
     @classmethod
-    def get_config_file(cls) -> Optional[str]:
+    def get_config_file(cls) -> str | None:
         """获取当前设置的全局配置文件路径"""
         return cls._global_config_file
 
@@ -561,7 +562,7 @@ class ProviderRegistry:
         return cls._app_config
 
     @classmethod
-    def get_config_class(cls, name: str) -> Optional[Type]:
+    def get_config_class(cls, name: str) -> type | None:
         """获取 provider 的配置类
 
         Args:
@@ -573,7 +574,7 @@ class ProviderRegistry:
         return cls._config_classes.get(name)
 
     @classmethod
-    def get_config_path(cls, name: str) -> Optional[str]:
+    def get_config_path(cls, name: str) -> str | None:
         """获取 provider 的配置路径
 
         Args:
@@ -585,7 +586,7 @@ class ProviderRegistry:
         return cls._config_paths.get(name)
 
     @classmethod
-    def get_params_info(cls, name: str) -> Dict[str, Dict[str, Any]]:
+    def get_params_info(cls, name: str) -> dict[str, dict[str, Any]]:
         """获取 provider 的参数信息
 
         Args:
@@ -597,7 +598,7 @@ class ProviderRegistry:
         return cls._params_info.get(name, {})
 
     @classmethod
-    def find_provider_by_class(cls, type_cls: Type) -> Optional[str]:
+    def find_provider_by_class(cls, type_cls: type) -> str | None:
         """根据类查找对应的 provider 名称
 
         Args:
@@ -614,10 +615,10 @@ class ProviderRegistry:
     @classmethod
     def get_instance_from_config(
         cls,
-        type_cls: Type[T],
+        type_cls: type[T],
         provider_name: str,
-        config_file: Optional[str] = None,
-        config_override: Optional[Dict[str, Any]] = None,
+        config_file: str | None = None,
+        config_override: dict[str, Any] | None = None,
         **kwargs,
     ) -> T:
         """从配置自动实例化类
@@ -757,7 +758,7 @@ class ProviderRegistry:
             raise ValueError(f"Failed to instantiate {provider_name} ({type_cls.__name__}): {e}") from e
 
     @classmethod
-    def _load_config_from_file(cls, config_file: str, provider_name: str) -> Dict[str, Any]:
+    def _load_config_from_file(cls, config_file: str, provider_name: str) -> dict[str, Any]:
         """从配置文件加载指定 provider 的配置
 
         根据 config_path（如 "cache.diskcache"）从配置文件中提取对应的配置段。
@@ -800,7 +801,7 @@ class ProviderRegistry:
 register_provider = ProviderRegistry.register
 
 
-def register_provider_group(config_name: str) -> Callable[[Type[T]], Type[T]]:
+def register_provider_group(config_name: str) -> Callable[[type[T]], type[T]]:
     """装饰器：注册 provider 组的配置名称
 
     用于装饰抽象基类，声明该 provider 组在配置文件中的名称。
@@ -827,7 +828,7 @@ def register_provider_group(config_name: str) -> Callable[[Type[T]], Type[T]]:
         >>> #     db_url: "..."
     """
 
-    def decorator(base_class: Type[T]) -> Type[T]:
+    def decorator(base_class: type[T]) -> type[T]:
         base_class_name = base_class.__name__
         ProviderRegistry.register_provider_group(base_class_name, config_name)
         return base_class
@@ -842,9 +843,9 @@ class RegistryManager:
     注册表存储 provider_name -> (module_path, class_name) 映射。
     """
 
-    _manager: Optional[multiprocessing.managers.SyncManager] = None
-    _shared_registry: Optional[Union[Dict[str, tuple], multiprocessing.managers.DictProxy]] = None
-    _lock: Optional[Any] = None  # Lock or proxy to Lock
+    _manager: multiprocessing.managers.SyncManager | None = None
+    _shared_registry: dict[str, tuple] | multiprocessing.managers.DictProxy | None = None
+    _lock: Any | None = None  # Lock or proxy to Lock
     _initialized: bool = False
 
     @classmethod
@@ -863,7 +864,7 @@ class RegistryManager:
         return cls._initialized and cls._shared_registry is not None
 
     @classmethod
-    def register(cls, name: str, class_type: Type):
+    def register(cls, name: str, class_type: type):
         """注册类到共享注册表
 
         Args:
@@ -890,7 +891,7 @@ class RegistryManager:
             logger.warning(f"Failed to register {name} to shared registry: {e}")
 
     @classmethod
-    def get(cls, name: str) -> Optional[Type]:
+    def get(cls, name: str) -> type | None:
         """从共享注册表获取类
 
         Args:
@@ -921,7 +922,7 @@ class RegistryManager:
             return None
 
     @classmethod
-    def get_all_providers(cls) -> Dict[str, tuple]:
+    def get_all_providers(cls) -> dict[str, tuple]:
         """获取所有已注册的 provider"""
         if not cls.is_enabled():
             return {}
@@ -937,7 +938,7 @@ class SingletonMeta(type):
     注意：多进程环境下，每个进程有独立的单例实例。
     """
 
-    _instances: Dict[Type, Any] = {}
+    _instances: dict[type, Any] = {}
     _lock = multiprocessing.Lock()
 
     def __call__(cls, *args, **kwargs):
@@ -956,7 +957,7 @@ class RegsiterMeta(type):
     支持本地注册表和可选的跨进程共享注册表。
     """
 
-    _registry: Dict[str, Type] = {}
+    _registry: dict[str, type] = {}
     _use_multiprocessing: bool = False
 
     def __init__(cls, name, bases, dct):
@@ -973,7 +974,7 @@ class RegsiterMeta(type):
                 RegistryManager.register(dct["name"], cls)
 
     @classmethod
-    def registry(cls) -> Dict[str, Type]:
+    def registry(cls) -> dict[str, type]:
         """获取本地注册表"""
         return cls._registry
 
@@ -1023,7 +1024,7 @@ class ClassFactory:
     """
 
     @staticmethod
-    def get_instance(provider_name: str, type_cls: Type[T], *args, **kwargs) -> T:
+    def get_instance(provider_name: str, type_cls: type[T], *args, **kwargs) -> T:
         """根据 provider 名称创建实例
 
         Args:
@@ -1039,7 +1040,7 @@ class ClassFactory:
             ValueError: provider 未找到或类型不匹配
             TypeError: 尝试实例化抽象类
         """
-        impl: Optional[Type[T]] = None
+        impl: type[T] | None = None
         use_provider_registry = False
 
         # 1. 优先从新的 ProviderRegistry 查找（装饰器注册，支持单例）

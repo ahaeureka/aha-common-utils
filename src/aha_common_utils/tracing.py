@@ -5,7 +5,6 @@ OpenTelemetry 追踪配置模块
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Optional
 
 from fastapi import FastAPI, Request, Response
 from opentelemetry import trace
@@ -21,7 +20,7 @@ logger = get_logger(__name__)
 
 def setup_tracing(
     service_name: str = "app",
-    otlp_endpoint: Optional[str] = None,
+    otlp_endpoint: str | None = None,
     enable_console: bool = False,
 ) -> trace.Tracer:
     """
