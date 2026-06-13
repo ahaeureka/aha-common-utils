@@ -95,10 +95,10 @@ def init_logging(level="DEBUG", log_dir="logs"):
         "<level>{message}</level>{extra[businessExtra]}"
     )
 
-    # 控制台输出配置（带颜色）
+    # 控制台输出配置（终端带颜色，重定向到文件时自动去除）
     logger.add(
         sys.stderr,
-        colorize=True,
+        colorize=None,
         format=log_format,
         level=level,
         backtrace=True,
