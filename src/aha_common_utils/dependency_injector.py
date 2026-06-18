@@ -359,7 +359,7 @@ def create_injector_from_config(config: Any) -> DependencyInjector:
     # 首先获取所有 provider 组
     provider_groups = ProviderRegistry.get_all_provider_groups()
 
-    for base_class_name, config_name in provider_groups.items():
+    for _base_class_name, config_name in provider_groups.items():
         # 获取配置组
         config_group = getattr(config, config_name, None)
         if not config_group or not isinstance(config_group, dict):
@@ -410,7 +410,7 @@ def create_injector_from_config(config: Any) -> DependencyInjector:
         # 1. 从 provider 组获取配置名称
         base_class_name = ProviderRegistry.get_base_class_for_provider(provider_name)
         if base_class_name:
-            config_name = ProviderRegistry.get_config_name_for_group(base_class_name)
+            config_name = ProviderRegistry.get_config_name_for_group(base_class_name)  # type: ignore[assignment]
             if config_name:
                 config_dict = getattr(config, config_name, {})
                 if isinstance(config_dict, dict):

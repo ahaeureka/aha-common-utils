@@ -2,6 +2,7 @@
 
 提供类似 FastAPI 的 Annotated[type, ParamMeta(...)] 机制，用于定义参数的描述、约束和验证规则。
 """
+
 from collections.abc import Callable
 from typing import Any
 

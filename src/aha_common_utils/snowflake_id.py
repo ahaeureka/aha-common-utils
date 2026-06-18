@@ -49,12 +49,7 @@ class SnowflakeIDGenerator:
     # Default epoch: 2020-01-01 00:00:00 UTC (in milliseconds)
     DEFAULT_EPOCH = 1577836800000
 
-    def __init__(
-        self,
-        data_center_id: int = 0,
-        worker_id: int = 0,
-        epoch: int | None = None
-    ):
+    def __init__(self, data_center_id: int = 0, worker_id: int = 0, epoch: int | None = None):
         """
         Initialize Snowflake ID generator.
 
@@ -67,14 +62,10 @@ class SnowflakeIDGenerator:
             ValueError: If data_center_id or worker_id is out of range
         """
         if data_center_id < 0 or data_center_id > self.MAX_DATA_CENTER_ID:
-            raise ValueError(
-                f"Data center ID must be between 0 and {self.MAX_DATA_CENTER_ID}"
-            )
+            raise ValueError(f"Data center ID must be between 0 and {self.MAX_DATA_CENTER_ID}")
 
         if worker_id < 0 or worker_id > self.MAX_WORKER_ID:
-            raise ValueError(
-                f"Worker ID must be between 0 and {self.MAX_WORKER_ID}"
-            )
+            raise ValueError(f"Worker ID must be between 0 and {self.MAX_WORKER_ID}")
 
         self.data_center_id = data_center_id
         self.worker_id = worker_id
@@ -137,10 +128,10 @@ class SnowflakeIDGenerator:
 
             # Generate ID
             snowflake_id = (
-                ((timestamp - self.epoch) << self.TIMESTAMP_SHIFT) |
-                (self.data_center_id << self.DATA_CENTER_ID_SHIFT) |
-                (self.worker_id << self.WORKER_ID_SHIFT) |
-                self._sequence
+                ((timestamp - self.epoch) << self.TIMESTAMP_SHIFT)
+                | (self.data_center_id << self.DATA_CENTER_ID_SHIFT)
+                | (self.worker_id << self.WORKER_ID_SHIFT)
+                | self._sequence
             )
 
             return snowflake_id
@@ -189,21 +180,16 @@ class SnowflakeIDGenerator:
             Dictionary with timestamp, data_center_id, worker_id, and sequence
         """
         timestamp_bits = (snowflake_id >> self.TIMESTAMP_SHIFT) + self.epoch
-        data_center_id = (
-            (snowflake_id >> self.DATA_CENTER_ID_SHIFT) & self.MAX_DATA_CENTER_ID
-        )
+        data_center_id = (snowflake_id >> self.DATA_CENTER_ID_SHIFT) & self.MAX_DATA_CENTER_ID
         worker_id = (snowflake_id >> self.WORKER_ID_SHIFT) & self.MAX_WORKER_ID
         sequence = snowflake_id & self.MAX_SEQUENCE
 
         return {
             "timestamp": timestamp_bits,
-            "timestamp_readable": time.strftime(
-                "%Y-%m-%d %H:%M:%S",
-                time.localtime(timestamp_bits / 1000)
-            ),
+            "timestamp_readable": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp_bits / 1000)),
             "data_center_id": data_center_id,
             "worker_id": worker_id,
-            "sequence": sequence
+            "sequence": sequence,
         }
 
 
@@ -213,9 +199,7 @@ _generator_lock = threading.Lock()
 
 
 def get_default_generator(
-    data_center_id: int = 0,
-    worker_id: int = 0,
-    epoch: int | None = None
+    data_center_id: int = 0, worker_id: int = 0, epoch: int | None = None
 ) -> SnowflakeIDGenerator:
     """
     Get or create the default global Snowflake ID generator.
@@ -232,11 +216,7 @@ def get_default_generator(
 
     with _generator_lock:
         if _default_generator is None:
-            _default_generator = SnowflakeIDGenerator(
-                data_center_id=data_center_id,
-                worker_id=worker_id,
-                epoch=epoch
-            )
+            _default_generator = SnowflakeIDGenerator(data_center_id=data_center_id, worker_id=worker_id, epoch=epoch)
         return _default_generator
 
 

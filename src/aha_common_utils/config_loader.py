@@ -272,7 +272,7 @@ class ConfigLoader:
 
                 if config_cls and base_class_name:
                     # 从 provider 组获取配置名称
-                    config_name = provider_groups.get(base_class_name)
+                    config_name = provider_groups.get(base_class_name)  # type: ignore[assignment]
 
                     if config_name:
                         if config_name not in configs_by_group:

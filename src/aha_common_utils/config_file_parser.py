@@ -812,7 +812,7 @@ def _write_toml(config_file: str | Path, data: dict[str, Any]) -> None:
     try:
         import tomli_w
     except ImportError:
-        raise ImportError("tomli_w is required for TOML writing. Install with: pip install tomli_w")
+        raise ImportError("tomli_w is required for TOML writing. Install with: pip install tomli_w") from None
     with open(config_file, "wb") as f:
         tomli_w.dump(data, f)
 

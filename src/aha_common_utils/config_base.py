@@ -127,13 +127,15 @@ class BaseParameters(BaseModel):
         >>> class AppParams(BaseParameters):
         ...     app_name: str = "my-app"
         ...     api_key: str = BaseParameters.field(
-        ...         "", description="API key for external service",
+        ...         "",
+        ...         description="API key for external service",
         ...         tags=["sensitive"],
         ...     )
         ...     max_retries: int = BaseParameters.field(
-        ...         3, description="Max retry attempts", fixed=True,
+        ...         3,
+        ...         description="Max retry attempts",
+        ...         fixed=True,
         ...     )
-        ...
         >>> params = AppParams(api_key="sk-secret-123")
         >>> print(params)
         AppParams(app_name='my-app', api_key='sk-s****', max_retries=3)
@@ -213,9 +215,7 @@ class BaseParameters(BaseModel):
     # ── Factory: from_dict ───────────────────────────────────────────
 
     @classmethod
-    def from_dict(
-        cls, data: dict[str, Any], ignore_extra_fields: bool = False
-    ) -> BaseParameters:
+    def from_dict(cls, data: dict[str, Any], ignore_extra_fields: bool = False) -> BaseParameters:
         """Construct an instance from a dictionary with env-var interpolation.
 
         Args:
@@ -279,9 +279,7 @@ class BaseParameters(BaseModel):
         elif isinstance(source, dict):
             source_data = source
         else:
-            raise TypeError(
-                f"source must be BaseParameters or dict, got {type(source).__name__}"
-            )
+            raise TypeError(f"source must be BaseParameters or dict, got {type(source).__name__}")
 
         updated = False
         for field_name, field_info in type(self).model_fields.items():
@@ -302,9 +300,7 @@ class BaseParameters(BaseModel):
         Combines pattern-based detection (``is_sensitive_field``) with
         the subclass ``_EXTRA_SENSITIVE_FIELDS`` set.
         """
-        return is_sensitive_field(field_name) or field_name.lower() in {
-            f.lower() for f in self._EXTRA_SENSITIVE_FIELDS
-        }
+        return is_sensitive_field(field_name) or field_name.lower() in {f.lower() for f in self._EXTRA_SENSITIVE_FIELDS}
 
     # ── Safe display ─────────────────────────────────────────────────
 
@@ -344,10 +340,7 @@ class BaseParameters(BaseModel):
             elif isinstance(value, BaseParameters):
                 result[field_name] = value.safe_dump()
             elif isinstance(value, list):
-                result[field_name] = [
-                    v.safe_dump() if isinstance(v, BaseParameters) else v
-                    for v in value
-                ]
+                result[field_name] = [v.safe_dump() if isinstance(v, BaseParameters) else v for v in value]
             else:
                 result[field_name] = value
         return result
@@ -421,7 +414,7 @@ class BaseParameters(BaseModel):
         """
         result: list[dict[str, Any]] = []
         for field_name, field_info in type(self).model_fields.items():
-            extra: dict[str, Any] = (getattr(field_info, "json_schema_extra", None) or {})
+            extra: dict[str, Any] = getattr(field_info, "json_schema_extra", None) or {}
             result.append(
                 {
                     "name": field_name,
@@ -473,7 +466,9 @@ class BaseParameters(BaseModel):
             ...         tags=["network"],
             ...     )
             ...     seed: int = BaseParameters.field(
-            ...         42, description="Random seed", fixed=True,
+            ...         42,
+            ...         description="Random seed",
+            ...         fixed=True,
             ...     )
         """
         extra: dict[str, Any] = kwargs.pop("json_schema_extra", {}) or {}

@@ -277,7 +277,6 @@ class ConfigStore:
         >>> class AppCfg(BaseParameters):
         ...     host: str = "localhost"
         ...     port: int = 8080
-        ...
         >>> store = ConfigStore()
         >>> cfg = store.load(AppCfg, base_dir=Path("/app"))
         >>> print(cfg.host)
@@ -419,9 +418,7 @@ class ConfigStore:
         # Resolve format
         fmt = (format or "").lstrip(".") or target_path.suffix.lstrip(".")
         if not fmt:
-            raise ValueError(
-                f"Cannot determine format for {target_path!s}; pass format= explicitly."
-            )
+            raise ValueError(f"Cannot determine format for {target_path!s}; pass format= explicitly.")
 
         # Partial update path
         if path:
@@ -438,21 +435,15 @@ class ConfigStore:
         elif fmt == "json":
             self._write_json(target_path, data)
         else:
-            raise ValueError(
-                f"Unsupported format {fmt!r}. Supported: yaml, yml, toml, json."
-            )
+            raise ValueError(f"Unsupported format {fmt!r}. Supported: yaml, yml, toml, json.")
 
     # ── Internal: file discovery ──────────────────────────────────────────
 
-    def _discover_yaml_files(
-        self, base_dir: Path, app_env: str
-    ) -> list[Path]:
+    def _discover_yaml_files(self, base_dir: Path, app_env: str) -> list[Path]:
         """Discover YAML config files: [config.yaml, config.<env>.yaml]."""
         return _build_yaml_config_files(base_dir=base_dir, app_env=app_env)
 
-    def _discover_toml_files(
-        self, base_dir: Path, app_env: str
-    ) -> list[Path]:
+    def _discover_toml_files(self, base_dir: Path, app_env: str) -> list[Path]:
         """Discover TOML config files: [config.toml, config.<env>.toml]."""
         return _build_toml_config_files(base_dir=base_dir, app_env=app_env)
 
@@ -540,7 +531,7 @@ class ConfigStore:
             key = env_key
             for prefix in ConfigStore._LEGACY_ENV_PREFIXES:
                 if key.startswith(prefix):
-                    key = key[len(prefix):]
+                    key = key[len(prefix) :]
                     break
 
             if not key or key == env_key and key.startswith("W5_FLOW_"):

@@ -28,8 +28,7 @@ def _find_env_files() -> list[Path]:
     import warnings
 
     warnings.warn(
-        "_find_env_files() is deprecated. "
-        "Use aha_common_utils.config_store.ConfigStore instead.",
+        "_find_env_files() is deprecated. Use aha_common_utils.config_store.ConfigStore instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -74,9 +73,9 @@ class ParamScanner:
 
         try:
             # 获取 __init__ 方法签名
-            sig = inspect.signature(cls.__init__)
+            sig = inspect.signature(cls.__init__)  # type: ignore[misc]
             # 获取类型注解
-            type_hints = get_type_hints(cls.__init__, include_extras=True)
+            type_hints = get_type_hints(cls.__init__, include_extras=True)  # type: ignore[misc]
 
             for param_name, param in sig.parameters.items():
                 if param_name == "self":
@@ -146,9 +145,9 @@ class ParamScanner:
 
         try:
             # 获取 __init__ 方法签名
-            sig = inspect.signature(cls.__init__)
+            sig = inspect.signature(cls.__init__)  # type: ignore[misc]
             # 获取类型注解
-            type_hints = get_type_hints(cls.__init__, include_extras=True)
+            type_hints = get_type_hints(cls.__init__, include_extras=True)  # type: ignore[misc]
 
             for param_name, param in sig.parameters.items():
                 if param_name == "self":

@@ -6,12 +6,13 @@
 3. 支持嵌套配置和主配置标记
 4. 配置类与加载器解耦
 """
+
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 from pydantic_settings import BaseSettings
 
-T = TypeVar('T', bound=BaseSettings)
+T = TypeVar("T", bound=BaseSettings)
 
 
 class ConfigRegistry:
@@ -54,18 +55,15 @@ class ConfigRegistry:
 
         if is_main:
             if self._main_config is not None:
-                raise ValueError(
-                    f"主配置已存在: {self._main_config}，"
-                    f"不能注册多个主配置（尝试注册: {name}）"
-                )
+                raise ValueError(f"主配置已存在: {self._main_config}，不能注册多个主配置（尝试注册: {name}）")
             self._main_config = name
 
         self._configs[name] = config_class
         self._config_metadata[name] = {
-            'is_main': is_main,
-            'description': description,
-            'depends_on': depends_on or [],
-            'class': config_class,
+            "is_main": is_main,
+            "description": description,
+            "depends_on": depends_on or [],
+            "class": config_class,
         }
 
         return config_class
@@ -168,6 +166,7 @@ def register_config(
         ...     database: DatabaseSettings
         ...     llm: LLMSettings
     """
+
     def decorator(config_class: type[T]) -> type[T]:
         return _global_registry.register(
             name=name,
@@ -176,6 +175,7 @@ def register_config(
             description=description,
             depends_on=depends_on,
         )
+
     return decorator
 
 
@@ -210,9 +210,9 @@ def get_main_config_class() -> type[BaseSettings] | None:
 
 
 __all__ = [
-    'ConfigRegistry',
-    'register_config',
-    'get_registry',
-    'get_config_class',
-    'get_main_config_class',
+    "ConfigRegistry",
+    "register_config",
+    "get_registry",
+    "get_config_class",
+    "get_main_config_class",
 ]

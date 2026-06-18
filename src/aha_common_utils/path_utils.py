@@ -24,8 +24,7 @@ def find_project_root(start_path: Path | None = None) -> Path:
         项目根目录路径
     """
     warnings.warn(
-        "find_project_root() is deprecated. "
-        "Use aha_common_utils.config_store.ConfigStore instead.",
+        "find_project_root() is deprecated. Use aha_common_utils.config_store.ConfigStore instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -53,8 +52,7 @@ def find_env_files_recursive(
         .env 文件路径列表，按优先级从低到高排序
     """
     warnings.warn(
-        "find_env_files_recursive() is deprecated. "
-        "Use aha_common_utils.config_store.ConfigStore instead.",
+        "find_env_files_recursive() is deprecated. Use aha_common_utils.config_store.ConfigStore instead.",
         DeprecationWarning,
         stacklevel=2,
     )
