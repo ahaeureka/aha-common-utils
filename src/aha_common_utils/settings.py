@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from aha_common_utils.config_base import BaseParameters
 from aha_common_utils.config_file_parser import (
     merge_configs as _merge_configs,
 )
@@ -33,4 +34,8 @@ def merge_configs(*configs):
     return _merge_configs(*configs)
 
 
-__all__ = ["read_config", "write_config", "merge_configs"]
+# Backward-compatible alias for projects that have not fully migrated.
+SecureBaseSettings = BaseParameters
+
+
+__all__ = ["read_config", "write_config", "merge_configs", "SecureBaseSettings"]
