@@ -486,14 +486,22 @@ class ConfigStore:
     def _load_env_files(base_dir: Path, app_env: str) -> None:
         """Load ``.env.local`` and ``.env.<ENV>.local`` into ``os.environ``.
 
-        Uses ``python-dotenv`` when available (falls back to a simple
-        line parser). Existing environment variables are never overwritten
-        (``override=False``).
+        Snapshots the process environment before loading any dotenv files,
+        then restores all pre-existing keys (including empty strings) after
+        loading.  This ensures that:
+
+        - Environment-specific dotenv can override base dotenv
+          (``.env.<ENV>.local`` loaded with ``override=True``).
+        - Process environment variables always retain highest priority,
+          regardless of what dotenv files contain.
 
         Args:
             base_dir: Project root directory.
             app_env: Environment identifier (e.g. ``"development"``).
         """
+        # Snapshot the current process environment before any dotenv loading
+        pre_existing = dict(os.environ)
+
         # .env.local (lower priority)
         env_local = _build_sensitive_env_file(base_dir=base_dir)
         if env_local is not None:
@@ -505,6 +513,9 @@ class ConfigStore:
         if env_specific is not None:
             load_env_file(env_specific, override=True)
             logger.debug("[ConfigStore] loaded env file: %s", env_specific.name)
+
+        # Restore all pre-existing process keys — process env is highest priority
+        os.environ.update(pre_existing)
 
     # ── Internal: env overrides ───────────────────────────────────────────
 
