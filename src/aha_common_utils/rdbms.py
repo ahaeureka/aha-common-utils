@@ -93,7 +93,7 @@ class RDBMS:
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def upsert(self, obj: TSQLModel, sets: list[str]):
+    async def upsert(self, obj: SQLModel, sets: list[str]):
         stm = insert(obj.__class__).on_duplicate_key_update(
             obj.model_dump())
         await self._session.execute(stm)
