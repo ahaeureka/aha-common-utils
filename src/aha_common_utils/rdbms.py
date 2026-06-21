@@ -163,34 +163,60 @@ class RDBMS:
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def insert(self, obj: SQLModel, session: AsyncSession | None = None):
+    async def insert(self, obj: SQLModel, session: AsyncSession | None = None, commit: bool = True):
         """Insert a single object into the database.
 
         Args:
             obj: SQLModel object to insert
             session: Optional AsyncSession to use, defaults to self._session
+            commit: Whether to auto-commit (default True, set to False in transactions)
 
         Returns:
             The inserted object with refreshed data
+
+        Examples:
+            # Default: auto-commit
+            await rdbms.insert(obj)
+
+            # In transaction: no auto-commit
+            async with rdbms.transaction() as session:
+                await rdbms.insert(obj, session=session, commit=False)
         """
         target_session = session or self._session
         target_session.add(obj)
-        await target_session.commit()
+
+        if commit:
+            await target_session.commit()
+
         await target_session.refresh(obj)
         return obj
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def batch_insert(self, objs: list[SQLModel], session: AsyncSession | None = None):
+    async def batch_insert(self, objs: list[SQLModel], session: AsyncSession | None = None, commit: bool = True):
         """Insert multiple objects into the database.
 
         Args:
             objs: List of SQLModel objects to insert
             session: Optional AsyncSession to use, defaults to self._session
+            commit: Whether to auto-commit (default True, set to False in transactions)
+
+        Returns:
+            None
+
+        Examples:
+            # Default: auto-commit
+            await rdbms.batch_insert([obj1, obj2])
+
+            # In transaction: no auto-commit
+            async with rdbms.transaction() as session:
+                await rdbms.batch_insert([obj1, obj2], session=session, commit=False)
         """
         target_session = session or self._session
         target_session.add_all(objs)
-        await target_session.commit()
+
+        if commit:
+            await target_session.commit()
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
@@ -234,21 +260,33 @@ class RDBMS:
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def upsert(self, obj: SQLModel, sets: list[str], session: AsyncSession | None = None):
+    async def upsert(self, obj: SQLModel, sets: list[str], session: AsyncSession | None = None, commit: bool = True):
         """Insert or update an object (UPSERT operation).
 
         Args:
             obj: SQLModel object to upsert
             sets: List of fields to update on duplicate key
             session: Optional AsyncSession to use, defaults to self._session
+            commit: Whether to auto-commit (default True, set to False in transactions)
 
         Returns:
             The upserted object with refreshed data
+
+        Examples:
+            # Default: auto-commit
+            await rdbms.upsert(obj, ["field1", "field2"])
+
+            # In transaction: no auto-commit
+            async with rdbms.transaction() as session:
+                await rdbms.upsert(obj, ["field1"], session=session, commit=False)
         """
         target_session = session or self._session
         stm = insert(obj.__class__).on_duplicate_key_update(obj.model_dump())
         await target_session.execute(stm)
-        await target_session.commit()
+
+        if commit:
+            await target_session.commit()
+
         await target_session.refresh(obj)
         return obj
 
@@ -278,7 +316,7 @@ class RDBMS:
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def update(self, model_cls: type[TSQLModel], updated: dict, *where, session: AsyncSession | None = None):
+    async def update(self, model_cls: type[TSQLModel], updated: dict, *where, session: AsyncSession | None = None, commit: bool = True):
         """Update objects matching conditions.
 
         Args:
@@ -286,16 +324,27 @@ class RDBMS:
             updated: Dictionary of field values to update
             *where: WHERE conditions
             session: Optional AsyncSession to use, defaults to self._session
+            commit: Whether to auto-commit (default True, set to False in transactions)
 
         Returns:
             True if update succeeded
+
+        Examples:
+            # Default: auto-commit
+            await rdbms.update(Model, {"field": "value"}, Model.id == id)
+
+            # In transaction: no auto-commit
+            async with rdbms.transaction() as session:
+                await rdbms.update(Model, {"field": "value"}, Model.id == id, session=session, commit=False)
         """
         target_session = session or self._session
         statement = update(model_cls).values(**updated).where(*where)
         logging.info(f"update sql is {statement}")
 
         await target_session.execute(statement)
-        await target_session.commit()
+
+        if commit:
+            await target_session.commit()
 
         return True
 
@@ -316,7 +365,7 @@ class RDBMS:
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def increment_atomic(self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession | None = None, **where):
+    async def increment_atomic(self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession | None = None, commit: bool = True, **where):
         """原子增加某个字段的值.
 
         Args:
@@ -324,10 +373,19 @@ class RDBMS:
             usage_field: 需要增加的字段
             usage: 增加的值
             session: Optional AsyncSession to use, defaults to self._session
+            commit: Whether to auto-commit (default True, set to False in transactions)
             **where: 查询条件
 
         Returns:
             None
+
+        Examples:
+            # Default: auto-commit
+            await rdbms.increment_atomic(Model, "counter", 1, id="key")
+
+            # In transaction: no auto-commit
+            async with rdbms.transaction() as session:
+                await rdbms.increment_atomic(Model, "counter", 1, session=session, commit=False, id="key")
         """
         target_session = session or self._session
         columns = [f for f in where.keys()]
@@ -340,4 +398,6 @@ class RDBMS:
         p = where
         p[usage_field] = usage
         await target_session.execute(sql, params=p)
-        await target_session.commit()
+
+        if commit:
+            await target_session.commit()
