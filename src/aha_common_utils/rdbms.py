@@ -9,6 +9,7 @@
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, TypeVar
 
 import sqlalchemy
@@ -48,6 +49,12 @@ class RDBMS:
     """
     Enhanced RDBMS class implementing DatabaseSessionPort interface.
     Manages database sessions with transaction support and retry logic.
+
+    Features:
+    - Transaction context manager support
+    - Health check mechanism
+    - Automatic retry on operational errors
+    - Integration with DatabaseSessionPort interface
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -77,6 +84,57 @@ class RDBMS:
         This method is part of the DatabaseSessionPort interface.
         """
         await session.rollback()
+
+    @asynccontextmanager
+    async def transaction(self):
+        """Transaction context manager for automatic commit/rollback.
+
+        Usage:
+            async with rdbms.transaction() as session:
+                # perform database operations
+                session.add(obj)
+
+        Automatically commits on success, rolls back on exception.
+        """
+        session = self._session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+    async def health_check(self) -> bool:
+        """Check if database connection is healthy.
+
+        Returns:
+            bool: True if connection is healthy, False otherwise.
+        """
+        try:
+            result = await self._session.execute(sqlalchemy.text("SELECT 1"))
+            return result.scalar() == 1
+        except Exception as e:
+            logging.warning(f"Database health check failed: {e}")
+            return False
+
+    async def execute_in_tx(self, func, *args, **kwargs):
+        """Execute a function within a transaction context.
+
+        Args:
+            func: Async function to execute within transaction
+            *args: Positional arguments for the function
+            **kwargs: Keyword arguments for the function
+
+        Returns:
+            Result of the function execution
+
+        Example:
+            result = await rdbms.execute_in_tx(
+                lambda session: session.get(Model, id)
+            )
+        """
+        async with self.transaction() as session:
+            return await func(session, *args, **kwargs)
 
     @classmethod
     def get_primary_key_names(cls, model_class: type[TSQLModel]) -> list[str]:
