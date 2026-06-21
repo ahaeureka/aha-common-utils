@@ -806,6 +806,16 @@ config = store.load(AppConfig, base_dir=Path("/custom/path"))
 
 `aha_common_utils.cli` 提供类 FastAPI 风格的声明式 CLI 框架，基于 [typer](https://typer.tiangolo.com/) 封装。
 
+### 使用约束
+
+> **业务包（`packages/know-know-app` 等）必须复用 `aha_common_utils.cli` 构建 CLI 入口。**
+>
+> - ✅ 使用 `CliApp` / `Router` 和 `Annotated[Opt(...)]` 等声明式参数注解
+> - ❌ 禁止直接使用 `argparse`、`click` 或其他底层 CLI 库
+> - ❌ 禁止在 `packages/know-know-core`、`packages/know-know-commons` 或 `packages/aha-common-utils` 中定义产品 CLI 入口
+>
+> CLI 测试统一使用 `typer.testing.CliRunner`，不通过子进程或手动 `parser.parse_args()` 测试。
+
 核心特性：
 
 - **`Annotated` 参数注解** — 用 `Annotated[T, Opt(...)]` 语法声明选项和位置参数，与 FastAPI 参数风格一致
