@@ -86,43 +86,56 @@ class RDBMS:
         await session.rollback()
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self, session: AsyncSession | None = None):
         """Transaction context manager for automatic commit/rollback.
+
+        Args:
+            session: Optional AsyncSession to use, defaults to self._session
 
         Usage:
             async with rdbms.transaction() as session:
                 # perform database operations
                 session.add(obj)
 
+        Or with external session:
+            async with rdbms.transaction(external_session) as session:
+                # perform database operations
+                session.add(obj)
+
         Automatically commits on success, rolls back on exception.
         """
-        session = self._session
+        target_session = session or self._session
         try:
-            yield session
-            await session.commit()
+            yield target_session
+            await target_session.commit()
         except Exception:
-            await session.rollback()
+            await target_session.rollback()
             raise
 
-    async def health_check(self) -> bool:
+    async def health_check(self, session: AsyncSession | None = None) -> bool:
         """Check if database connection is healthy.
 
+        Args:
+            session: Optional AsyncSession to use, defaults to self._session
+
         Returns:
-            bool: True if connection is healthy, False otherwise.
+            bool: True if connection is healthy, False otherwise
         """
+        target_session = session or self._session
         try:
-            result = await self._session.execute(sqlalchemy.text("SELECT 1"))
+            result = await target_session.execute(sqlalchemy.text("SELECT 1"))
             return result.scalar() == 1
         except Exception as e:
             logging.warning(f"Database health check failed: {e}")
             return False
 
-    async def execute_in_tx(self, func, *args, **kwargs):
+    async def execute_in_tx(self, func, *args, session: AsyncSession | None = None, **kwargs):
         """Execute a function within a transaction context.
 
         Args:
             func: Async function to execute within transaction
             *args: Positional arguments for the function
+            session: Optional AsyncSession to use for the transaction
             **kwargs: Keyword arguments for the function
 
         Returns:
@@ -133,8 +146,8 @@ class RDBMS:
                 lambda session: session.get(Model, id)
             )
         """
-        async with self.transaction() as session:
-            return await func(session, *args, **kwargs)
+        async with self.transaction(session) as tx_session:
+            return await func(tx_session, *args, **kwargs)
 
     @classmethod
     def get_primary_key_names(cls, model_class: type[TSQLModel]) -> list[str]:
@@ -150,87 +163,173 @@ class RDBMS:
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def insert(self, obj: SQLModel):
-        self._session.add(obj)
-        await self._session.commit()
-        await self._session.refresh(obj)
+    async def insert(self, obj: SQLModel, session: AsyncSession | None = None):
+        """Insert a single object into the database.
+
+        Args:
+            obj: SQLModel object to insert
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            The inserted object with refreshed data
+        """
+        target_session = session or self._session
+        target_session.add(obj)
+        await target_session.commit()
+        await target_session.refresh(obj)
         return obj
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def batch_insert(self, objs: list[SQLModel]):
-        self._session.add_all(objs)
-        await self._session.commit()
+    async def batch_insert(self, objs: list[SQLModel], session: AsyncSession | None = None):
+        """Insert multiple objects into the database.
+
+        Args:
+            objs: List of SQLModel objects to insert
+            session: Optional AsyncSession to use, defaults to self._session
+        """
+        target_session = session or self._session
+        target_session.add_all(objs)
+        await target_session.commit()
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def get(self, model_cls: type[TSQLModel], pk: str) -> TSQLModel | None:
-        return await self._session.get(model_cls, pk)
+    async def get(self, model_cls: type[TSQLModel], pk: str, session: AsyncSession | None = None) -> TSQLModel | None:
+        """Get an object by primary key.
+
+        Args:
+            model_cls: SQLModel class to query
+            pk: Primary key value
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            The object if found, None otherwise
+        """
+        target_session = session or self._session
+        return await target_session.get(model_cls, pk)
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def get_by_filter(self, model_cls: type[TSQLModel], *where, limit=None, offset=None):
+    async def get_by_filter(self, model_cls: type[TSQLModel], *where, limit=None, offset=None, session: AsyncSession | None = None):
+        """Get objects by filter conditions.
+
+        Args:
+            model_cls: SQLModel class to query
+            *where: WHERE conditions
+            limit: Optional limit for results
+            offset: Optional offset for results
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            List of objects matching the filter
+        """
+        target_session = session or self._session
         statement = select(model_cls).where(*where)
         if limit:
             statement = statement.limit(limit)
         if offset:
             statement = statement.offset(offset)
-        result = await self._session.execute(statement)
+        result = await target_session.execute(statement)
         return result.scalars().all()
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def upsert(self, obj: SQLModel, sets: list[str]):
-        stm = insert(obj.__class__).on_duplicate_key_update(
-            obj.model_dump())
-        await self._session.execute(stm)
-        await self._session.commit()
-        await self._session.refresh(obj)
+    async def upsert(self, obj: SQLModel, sets: list[str], session: AsyncSession | None = None):
+        """Insert or update an object (UPSERT operation).
+
+        Args:
+            obj: SQLModel object to upsert
+            sets: List of fields to update on duplicate key
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            The upserted object with refreshed data
+        """
+        target_session = session or self._session
+        stm = insert(obj.__class__).on_duplicate_key_update(obj.model_dump())
+        await target_session.execute(stm)
+        await target_session.commit()
+        await target_session.refresh(obj)
         return obj
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def list(self, model_cls: type[TSQLModel], page, limit, *where) -> tuple[list[TSQLModel], int]:
+    async def list(self, model_cls: type[TSQLModel], page, limit, *where, session: AsyncSession | None = None) -> tuple[list[TSQLModel], int]:
+        """List objects with pagination.
+
+        Args:
+            model_cls: SQLModel class to query
+            page: Page number (1-indexed)
+            limit: Number of items per page
+            *where: WHERE conditions
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            Tuple of (list of objects, total count)
+        """
+        target_session = session or self._session
         primary_key_names = self.get_primary_key_names(model_cls)
         primary_key_col = getattr(model_cls, primary_key_names[0])
-        total_result = await self._session.execute(select(primary_key_col).where(*where))
+        total_result = await target_session.execute(select(primary_key_col).where(*where))
         total = len(total_result.scalars().all())
-        statement = select(model_cls).where(
-            *where).limit(limit).offset((page - 1) * limit)
-        result = await self._session.execute(statement)
+        statement = select(model_cls).where(*where).limit(limit).offset((page - 1) * limit)
+        result = await target_session.execute(statement)
         return list(result.scalars().all()), total
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def update(self, model_cls: type[TSQLModel], updated: dict, *where):
+    async def update(self, model_cls: type[TSQLModel], updated: dict, *where, session: AsyncSession | None = None):
+        """Update objects matching conditions.
+
+        Args:
+            model_cls: SQLModel class to update
+            updated: Dictionary of field values to update
+            *where: WHERE conditions
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            True if update succeeded
+        """
+        target_session = session or self._session
         statement = update(model_cls).values(**updated).where(*where)
         logging.info(f"update sql is {statement}")
 
-        await self._session.execute(statement)
-        await self._session.commit()
+        await target_session.execute(statement)
+        await target_session.commit()
 
         return True
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def exec(self, statement: Executable) -> Result:
+    async def exec(self, statement: Executable, session: AsyncSession | None = None) -> Result:
+        """Execute a statement and return result.
+
+        Args:
+            statement: SQL statement to execute
+            session: Optional AsyncSession to use, defaults to self._session
+
+        Returns:
+            Result object from the execution
         """
-        Execute a statement and return a scalar result.
-        """
-        return await self._session.execute(statement)
+        target_session = session or self._session
+        return await target_session.execute(statement)
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def increment_atomic(self, model_cls: type[TSQLModel], usage_field: str, usage: int, **where):
-        """
-        原子增加某个字段的值
+    async def increment_atomic(self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession | None = None, **where):
+        """原子增加某个字段的值.
+
         Args:
             model_cls: 表
             usage_field: 需要增加的字段
             usage: 增加的值
-            where: 查询条件
-        Returns
+            session: Optional AsyncSession to use, defaults to self._session
+            **where: 查询条件
+
+        Returns:
+            None
         """
+        target_session = session or self._session
         columns = [f for f in where.keys()]
         columns.append(usage_field)
         sql = sqlalchemy.text(f"""
@@ -240,5 +339,5 @@ class RDBMS:
     """)
         p = where
         p[usage_field] = usage
-        await self._session.execute(sql, params=p)
-        await self._session.commit()
+        await target_session.execute(sql, params=p)
+        await target_session.commit()
