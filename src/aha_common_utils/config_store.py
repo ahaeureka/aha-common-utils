@@ -526,11 +526,12 @@ class ConfigStore:
     def _apply_env_overrides(merged: dict[str, Any]) -> None:
         """Apply process environment variables as overrides.
 
-        Environment variables whose names match either a top-level key
-        or a known ``validation_alias`` of a nested field are routed to
-        the correct location in *merged*.  Legacy ``W5_FLOW_`` prefix is
-        automatically stripped before matching.
+        Environment variable names are routed to nested config paths using
+        ``SECTION_FIELD`` splitting: each ``_``-separated segment is tried
+        as a dict key walking down from the root of *merged*.  For example,
+        ``DATABASE_URL`` routes to ``merged["database"]["url"]``.
 
+        Legacy ``W5_FLOW_`` prefix is automatically stripped before matching.
         Values are type-coerced to match the existing value's type
         (bool, int, float, or string).
 
@@ -545,8 +546,7 @@ class ConfigStore:
                     key = key[len(prefix) :]
                     break
 
-            if not key or key == env_key and key.startswith("W5_FLOW_"):
-                # key unchanged and still has prefix — not a matchable key
+            if not key or (key == env_key and key.startswith("W5_FLOW_")):
                 continue
 
             # Try top-level match first
@@ -554,12 +554,40 @@ class ConfigStore:
                 merged[key] = _coerce_value(env_val, merged[key])
                 continue
 
-            # Try nested routing via split: W5_FLOW_LLM_API_KEY → LLM_API_KEY
-            # Match against known flat→nested paths from BaseParameters aliases
-            # The before-validator on AppConfig will handle routing, so we
-            # just need to ensure the flat key exists at top level for routing
-            # Insert as a synthetic top-level key — from_dict will route it
-            merged[key] = _coerce_value(env_val, merged.get(key, env_val))
+            # Try SECTION_FIELD nested routing: split on _ and walk the dict
+            _set_nested_env(merged, key, _coerce_value(env_val, env_val))
+
+
+# ── Helper: SECTION_FIELD nested routing ────────────────────────────────
+
+
+def _set_nested_env(
+    merged: dict[str, Any],
+    key: str,
+    value: Any,
+) -> bool:
+    """Route a flat env key into *merged* using SECTION_FIELD splitting.
+
+    Splits *key* on ``_`` and walks or creates nested dicts in *merged*.
+    Returns ``True`` if the value was set at a nested path.
+
+    Examples:
+        ``APP_NAME`` → ``merged["app"]["name"]``
+        ``DATABASE_URL`` → ``merged["database"]["url"]``
+    """
+    parts = key.lower().split("_")
+    if len(parts) < 2:
+        return False
+
+    # Walk the merged dict, auto-creating intermediate dicts
+    node: dict[str, Any] = merged
+    for _i, part in enumerate(parts[:-1]):
+        if part not in node or not isinstance(node[part], dict):
+            node[part] = {}
+        node = node[part]
+
+    node[parts[-1]] = value
+    return True
 
     # ── Internal: writing helpers ─────────────────────────────────────────
 
