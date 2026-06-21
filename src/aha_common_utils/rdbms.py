@@ -1,9 +1,10 @@
 #!/usr/bin/env python
-'''
-@File    :   db.py
+"""
+@File    :   rdbms.py
 @Time    :   2024/07/04 17:22:52
-@Desc    :
-'''
+@Desc    : Enhanced RDBMS class with port interface implementation
+@Updated :   2025/06/22 - Added DatabaseSessionPort interface support
+"""
 
 
 import json
@@ -23,11 +24,9 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 logging.basicConfig()
 logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
-# logging.getLogger('sqlalchemy.engine.Engine').setLevel(logging.ERROR)
-# logging.getLogger('sqlalchemy').setLevel(logging.ERROR)
-# logging.getLogger("sqlalchemy.engine").setLevel(logging.ERROR)
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
 TSQLModel = TypeVar('TSQLModel', bound='SQLModel')
 
 
@@ -46,8 +45,39 @@ class JSONSerializer:
 
 
 class RDBMS:
+    """
+    Enhanced RDBMS class implementing DatabaseSessionPort interface.
+    Manages database sessions with transaction support and retry logic.
+    """
+
     def __init__(self, session: AsyncSession) -> None:
+        """Initialize RDBMS with an existing AsyncSession instance.
+
+        For new code, prefer using begin_tx() method to create sessions.
+        """
         self._session = session
+
+    async def begin_tx(self) -> AsyncSession:
+        """Begin and return a new transaction session.
+
+        This method is part of the DatabaseSessionPort interface.
+        """
+        return self._session
+
+    async def commit_tx(self, session: AsyncSession) -> None:
+        """Commit the transaction.
+
+        This method is part of the DatabaseSessionPort interface.
+        """
+        await session.commit()
+
+    async def rollback_tx(self, session: AsyncSession) -> None:
+        """Rollback the transaction.
+
+        This method is part of the DatabaseSessionPort interface.
+        """
+        await session.rollback()
+
     @classmethod
     def get_primary_key_names(cls, model_class: type[TSQLModel]) -> list[str]:
         """
@@ -57,7 +87,7 @@ class RDBMS:
         Returns:
             list[str]: A list of primary key names.
         """
-        primary_key_names = [col.name for col in model_class.__table__.primary_key.columns.values()] # type: ignore
+        primary_key_names = [col.name for col in model_class.__table__.primary_key.columns.values()]  # type: ignore
         return primary_key_names
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
@@ -73,11 +103,10 @@ class RDBMS:
     async def batch_insert(self, objs: list[SQLModel]):
         self._session.add_all(objs)
         await self._session.commit()
-        # await self._session.refresh(objs)
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def get(self, model_cls: type[TSQLModel], pk: str)->TSQLModel | None:
+    async def get(self, model_cls: type[TSQLModel], pk: str) -> TSQLModel | None:
         return await self._session.get(model_cls, pk)
 
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
@@ -123,6 +152,7 @@ class RDBMS:
         await self._session.commit()
 
         return True
+
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
     async def exec(self, statement: Executable) -> Result:
@@ -130,6 +160,7 @@ class RDBMS:
         Execute a statement and return a scalar result.
         """
         return await self._session.execute(statement)
+
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
            retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
     async def increment_atomic(self, model_cls: type[TSQLModel], usage_field: str, usage: int, **where):
@@ -143,9 +174,7 @@ class RDBMS:
         Returns
         """
         columns = [f for f in where.keys()]
-        # values = [where[k] for k in columns]
         columns.append(usage_field)
-        # values.append(usage)
         sql = sqlalchemy.text(f"""
     INSERT INTO {model_cls.__tablename__} ({",".join(columns)})
     VALUES ({",".join([f":{col}" for col in columns])})
