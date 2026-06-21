@@ -380,6 +380,115 @@ class ConfigStore:
         instance = config_class.from_dict(merged, ignore_extra_fields=True)
 
         return instance
+    @staticmethod
+    def _write_toml(path: Path, data: dict[str, Any]) -> None:
+        """Write data as TOML, using tomlkit for comment-preserving output.
+
+        Falls back to ``tomli_w`` if ``tomlkit`` is not installed.
+
+        Args:
+            path: Output file path.
+            data: Configuration dict to write.
+        """
+        try:
+            import tomlkit
+
+            doc = tomlkit.document()
+            for key, value in data.items():
+                doc[key] = _to_tomlkit(value)
+            with open(path, "w", encoding="utf-8") as f:
+                tomlkit.dump(doc, f)
+            logger.debug("[ConfigStore] wrote TOML (tomlkit): %s", path)
+        except ImportError:
+            import tomli_w
+
+            with open(path, "wb") as f:
+                tomli_w.dump(data, f)
+            logger.debug("[ConfigStore] wrote TOML (tomli_w): %s", path)
+
+    @staticmethod
+    def _write_yaml(path: Path, data: dict[str, Any]) -> None:
+        """Write data as YAML.
+
+        Args:
+            path: Output file path.
+            data: Configuration dict to write.
+        """
+        import yaml
+
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        logger.debug("[ConfigStore] wrote YAML: %s", path)
+
+    @staticmethod
+    def _write_json(path: Path, data: dict[str, Any]) -> None:
+        """Write data as JSON with indentation.
+
+        Args:
+            path: Output file path.
+            data: Configuration dict to write.
+        """
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, indent=2, ensure_ascii=False)
+        logger.debug("[ConfigStore] wrote JSON: %s", path)
+
+    # ── Internal: partial update ──────────────────────────────────────────
+
+    @staticmethod
+    def _partial_update(
+        target_path: Path,
+        data: dict[str, Any],
+        path: str,
+        fmt: str,
+    ) -> None:
+        """Read-modify-write a config file, updating only the section at *path*.
+
+        Reads the existing file, navigates into the dot-separated *path*,
+        deep-merges *data* into that section, and writes the entire file back.
+
+        Args:
+            target_path: Path to the config file.
+            data: New data to merge into the target section.
+            path: Dot-separated path to the section (e.g. ``"llm"`` or
+                ``"cache.diskcache"``).
+            fmt: Output format (``"toml"``, ``"yaml"``, ``"yml"``, ``"json"``).
+
+        Raises:
+            FileNotFoundError: If the target file does not exist.
+        """
+        if not target_path.is_file():
+            raise FileNotFoundError(f"Config file not found for partial update: {target_path}")
+
+        # Read existing
+        existing = ConfigStore._parse_file(target_path)
+
+        # Navigate to the target section, creating intermediate dicts as needed
+        current: dict[str, Any] = existing
+        parts = path.split(".")
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            elif not isinstance(current[part], dict):
+                current[part] = {}
+            current = current[part]
+
+        # Merge data into the target section
+        last = parts[-1]
+        if isinstance(current.get(last), dict) and isinstance(data, dict):
+            _deep_merge(current[last], data)
+        else:
+            current[last] = data
+
+        # Write back
+        os.makedirs(target_path.parent, exist_ok=True)
+        if fmt in ("yaml", "yml"):
+            ConfigStore._write_yaml(target_path, existing)
+        elif fmt == "toml":
+            ConfigStore._write_toml(target_path, existing)
+        elif fmt == "json":
+            ConfigStore._write_json(target_path, existing)
+        else:
+            raise ValueError(f"Unsupported format for partial update: {fmt!r}")
 
     # ── save ──────────────────────────────────────────────────────────────
 
@@ -591,115 +700,6 @@ def _set_nested_env(
 
     # ── Internal: writing helpers ─────────────────────────────────────────
 
-    @staticmethod
-    def _write_toml(path: Path, data: dict[str, Any]) -> None:
-        """Write data as TOML, using tomlkit for comment-preserving output.
-
-        Falls back to ``tomli_w`` if ``tomlkit`` is not installed.
-
-        Args:
-            path: Output file path.
-            data: Configuration dict to write.
-        """
-        try:
-            import tomlkit
-
-            doc = tomlkit.document()
-            for key, value in data.items():
-                doc[key] = _to_tomlkit(value)
-            with open(path, "w", encoding="utf-8") as f:
-                tomlkit.dump(doc, f)
-            logger.debug("[ConfigStore] wrote TOML (tomlkit): %s", path)
-        except ImportError:
-            import tomli_w
-
-            with open(path, "wb") as f:
-                tomli_w.dump(data, f)
-            logger.debug("[ConfigStore] wrote TOML (tomli_w): %s", path)
-
-    @staticmethod
-    def _write_yaml(path: Path, data: dict[str, Any]) -> None:
-        """Write data as YAML.
-
-        Args:
-            path: Output file path.
-            data: Configuration dict to write.
-        """
-        import yaml
-
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        logger.debug("[ConfigStore] wrote YAML: %s", path)
-
-    @staticmethod
-    def _write_json(path: Path, data: dict[str, Any]) -> None:
-        """Write data as JSON with indentation.
-
-        Args:
-            path: Output file path.
-            data: Configuration dict to write.
-        """
-        with open(path, "w", encoding="utf-8") as f:
-            _json.dump(data, f, indent=2, ensure_ascii=False)
-        logger.debug("[ConfigStore] wrote JSON: %s", path)
-
-    # ── Internal: partial update ──────────────────────────────────────────
-
-    @staticmethod
-    def _partial_update(
-        target_path: Path,
-        data: dict[str, Any],
-        path: str,
-        fmt: str,
-    ) -> None:
-        """Read-modify-write a config file, updating only the section at *path*.
-
-        Reads the existing file, navigates into the dot-separated *path*,
-        deep-merges *data* into that section, and writes the entire file back.
-
-        Args:
-            target_path: Path to the config file.
-            data: New data to merge into the target section.
-            path: Dot-separated path to the section (e.g. ``"llm"`` or
-                ``"cache.diskcache"``).
-            fmt: Output format (``"toml"``, ``"yaml"``, ``"yml"``, ``"json"``).
-
-        Raises:
-            FileNotFoundError: If the target file does not exist.
-        """
-        if not target_path.is_file():
-            raise FileNotFoundError(f"Config file not found for partial update: {target_path}")
-
-        # Read existing
-        existing = ConfigStore._parse_file(target_path)
-
-        # Navigate to the target section, creating intermediate dicts as needed
-        current: dict[str, Any] = existing
-        parts = path.split(".")
-        for part in parts[:-1]:
-            if part not in current:
-                current[part] = {}
-            elif not isinstance(current[part], dict):
-                current[part] = {}
-            current = current[part]
-
-        # Merge data into the target section
-        last = parts[-1]
-        if isinstance(current.get(last), dict) and isinstance(data, dict):
-            _deep_merge(current[last], data)
-        else:
-            current[last] = data
-
-        # Write back
-        os.makedirs(target_path.parent, exist_ok=True)
-        if fmt in ("yaml", "yml"):
-            ConfigStore._write_yaml(target_path, existing)
-        elif fmt == "toml":
-            ConfigStore._write_toml(target_path, existing)
-        elif fmt == "json":
-            ConfigStore._write_json(target_path, existing)
-        else:
-            raise ValueError(f"Unsupported format for partial update: {fmt!r}")
 
 
 __all__ = [

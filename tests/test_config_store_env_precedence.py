@@ -21,6 +21,7 @@ class ExampleConfig(BaseParameters):
 
 # ── Contract 1: env-specific dotenv overrides base dotenv ────────────────
 
+
 def test_environment_local_dotenv_overrides_base_dotenv(tmp_path: Path, monkeypatch) -> None:
     """.env.<ENV>.local values win over .env.local when both define the same key."""
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=base-dotenv\n", encoding="utf-8")
@@ -38,6 +39,7 @@ def test_environment_local_dotenv_overrides_base_dotenv(tmp_path: Path, monkeypa
 
 # ── Contract 2: pre-existing process key beats both dotenv files ─────────
 
+
 def test_process_env_beats_dotenv_files(tmp_path: Path, monkeypatch) -> None:
     """A process env value set before load() is never overwritten by dotenv."""
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=base-dotenv\n", encoding="utf-8")
@@ -54,6 +56,7 @@ def test_process_env_beats_dotenv_files(tmp_path: Path, monkeypatch) -> None:
 
 # ── Contract 3: pre-existing empty string is restored ────────────────────
 
+
 def test_process_empty_string_is_restored_after_dotenv(tmp_path: Path, monkeypatch) -> None:
     """A pre-existing empty string in process env is restored after dotenv loading."""
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=dotenv-value\n", encoding="utf-8")
@@ -69,6 +72,7 @@ def test_process_empty_string_is_restored_after_dotenv(tmp_path: Path, monkeypat
 
 
 # ── Contract 4: unrelated process key is left unchanged ──────────────────
+
 
 def test_unrelated_process_key_preserved(tmp_path: Path, monkeypatch) -> None:
     """Process env keys not in any dotenv file are preserved unchanged."""
