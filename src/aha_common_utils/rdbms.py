@@ -6,11 +6,10 @@
 @Updated :   2025/06/22 - Added DatabaseSessionPort interface support
 """
 
-
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
 import sqlalchemy
 import sqlalchemy.exc
@@ -18,6 +17,7 @@ import tenacity
 from pydantic import BaseModel
 from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.engine.result import Result
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel, select, update
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -25,10 +25,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 logging.basicConfig()
 logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
-TSQLModel = TypeVar('TSQLModel', bound='SQLModel')
+TSQLModel = TypeVar("TSQLModel", bound="SQLModel")
 
 
 class JSONSerializer:
@@ -36,9 +33,10 @@ class JSONSerializer:
         if isinstance(value, BaseModel) or isinstance(value, SQLModel):
             return json.dumps(value.model_dump(), ensure_ascii=False)
         if isinstance(value, list):
-            return json.dumps([v.model_dump() if isinstance(v, BaseModel) or
-                               isinstance(v, SQLModel) else v for v in value],
-                              ensure_ascii=False)
+            return json.dumps(
+                [v.model_dump() if isinstance(v, BaseModel) or isinstance(v, SQLModel) else v for v in value],
+                ensure_ascii=False,
+            )
         return json.dumps(value, ensure_ascii=False)
 
     def deserializer(self, value):
@@ -161,8 +159,11 @@ class RDBMS:
         primary_key_names = [col.name for col in model_class.__table__.primary_key.columns.values()]  # type: ignore
         return primary_key_names
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
     async def insert(self, obj: SQLModel, session: AsyncSession | None = None, commit: bool = True):
         """Insert a single object into the database.
 
@@ -191,8 +192,11 @@ class RDBMS:
         await target_session.refresh(obj)
         return obj
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
     async def batch_insert(self, objs: list[SQLModel], session: AsyncSession | None = None, commit: bool = True):
         """Insert multiple objects into the database.
 
@@ -218,8 +222,11 @@ class RDBMS:
         if commit:
             await target_session.commit()
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
     async def get(self, model_cls: type[TSQLModel], pk: str, session: AsyncSession | None = None) -> TSQLModel | None:
         """Get an object by primary key.
 
@@ -234,9 +241,14 @@ class RDBMS:
         target_session = session or self._session
         return await target_session.get(model_cls, pk)
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def get_by_filter(self, model_cls: type[TSQLModel], *where, limit=None, offset=None, session: AsyncSession | None = None):
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
+    async def get_by_filter(
+        self, model_cls: type[TSQLModel], *where, limit=None, offset=None, session: AsyncSession | None = None
+    ):
         """Get objects by filter conditions.
 
         Args:
@@ -258,8 +270,11 @@ class RDBMS:
         result = await target_session.execute(statement)
         return result.scalars().all()
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
     async def upsert(self, obj: SQLModel, sets: list[str], session: AsyncSession | None = None, commit: bool = True):
         """Insert or update an object (UPSERT operation).
 
@@ -290,9 +305,14 @@ class RDBMS:
         await target_session.refresh(obj)
         return obj
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def list(self, model_cls: type[TSQLModel], page, limit, *where, session: AsyncSession | None = None) -> tuple[list[TSQLModel], int]:
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
+    async def list(
+        self, model_cls: type[TSQLModel], page, limit, *where, session: AsyncSession | None = None
+    ) -> tuple[list[TSQLModel], int]:
         """List objects with pagination.
 
         Args:
@@ -314,9 +334,19 @@ class RDBMS:
         result = await target_session.execute(statement)
         return list(result.scalars().all()), total
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def update(self, model_cls: type[TSQLModel], updated: dict, *where, session: AsyncSession | None = None, commit: bool = True):
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
+    async def update(
+        self,
+        model_cls: type[TSQLModel],
+        updated: dict,
+        *where,
+        session: AsyncSession | None = None,
+        commit: bool = True,
+    ):
         """Update objects matching conditions.
 
         Args:
@@ -348,8 +378,11 @@ class RDBMS:
 
         return True
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
     async def exec(self, statement: Executable, session: AsyncSession | None = None) -> Result:
         """Execute a statement and return result.
 
@@ -363,9 +396,20 @@ class RDBMS:
         target_session = session or self._session
         return await target_session.execute(statement)
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2),
-           retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError))
-    async def increment_atomic(self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession | None = None, commit: bool = True, **where):
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
+    async def increment_atomic(
+        self,
+        model_cls: type[TSQLModel],
+        usage_field: str,
+        usage: int,
+        session: AsyncSession | None = None,
+        commit: bool = True,
+        **where,
+    ):
         """原子增加某个字段的值.
 
         Args:
