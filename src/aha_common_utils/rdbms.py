@@ -16,6 +16,7 @@ import sqlalchemy.exc
 import tenacity
 from pydantic import BaseModel
 from sqlalchemy.dialects.mysql import insert
+from sqlalchemy.engine.cursor import CursorResult
 from sqlalchemy.engine.result import Result
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Executable
@@ -346,7 +347,7 @@ class RDBMS:
         *where,
         session: AsyncSession | None = None,
         commit: bool = True,
-    ):
+    ) -> CursorResult:
         """Update objects matching conditions.
 
         Args:
@@ -357,11 +358,17 @@ class RDBMS:
             commit: Whether to auto-commit (default True, set to False in transactions)
 
         Returns:
-            True if update succeeded
+            CursorResult: 执行结果，调用方可读取 ``.rowcount`` 判断匹配行数
+            （向后兼容：原返回 True；CursorResult 为真值，原有 ``if await update(...)`` 仍成立）
 
         Examples:
             # Default: auto-commit
             await rdbms.update(Model, {"field": "value"}, Model.id == id)
+
+            # 检查是否命中
+            result = await rdbms.update(Model, {"field": "value"}, Model.id == id)
+            if result.rowcount == 0:
+                ...
 
             # In transaction: no auto-commit
             async with rdbms.transaction() as session:
@@ -371,12 +378,12 @@ class RDBMS:
         statement = update(model_cls).values(**updated).where(*where)
         logging.info(f"update sql is {statement}")
 
-        await target_session.execute(statement)
+        result = await target_session.execute(statement)
 
         if commit:
             await target_session.commit()
 
-        return True
+        return result  # type: ignore[return-value]
 
     @retry(
         stop=stop_after_attempt(5),
