@@ -380,6 +380,7 @@ class ConfigStore:
         instance = config_class.from_dict(merged, ignore_extra_fields=True)
 
         return instance
+
     @staticmethod
     def _write_toml(path: Path, data: dict[str, Any]) -> None:
         """Write data as TOML, using tomlkit for comment-preserving output.
@@ -699,7 +700,6 @@ def _set_nested_env(
     return True
 
     # ── Internal: writing helpers ─────────────────────────────────────────
-
 
 
 __all__ = [
