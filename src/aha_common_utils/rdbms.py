@@ -160,6 +160,17 @@ class RDBMS:
         primary_key_names = [col.name for col in model_class.__table__.primary_key.columns.values()]  # type: ignore
         return primary_key_names
 
+    @staticmethod
+    def now_ms() -> int:
+        """当前 UTC 毫秒时间戳。
+
+        持久层 ``created_at`` / ``updated_at`` / ``run_at`` 等时间字段统一使用毫秒精度，
+        此 helper 消除业务代码中反复出现的 ``int(datetime.now(UTC).timestamp() * 1000)``。
+        """
+        from datetime import UTC, datetime
+
+        return int(datetime.now(UTC).timestamp() * 1000)
+
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
@@ -248,15 +259,26 @@ class RDBMS:
         retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
     )
     async def get_by_filter(
-        self, model_cls: type[TSQLModel], *where, limit=None, offset=None, session: AsyncSession | None = None
-    ):
+        self,
+        model_cls: type[TSQLModel],
+        *where,
+        order_by=None,
+        limit=None,
+        offset=None,
+        for_update: bool = False,
+        skip_locked: bool = False,
+        session: AsyncSession | None = None,
+    ) -> list[TSQLModel]:
         """Get objects by filter conditions.
 
         Args:
             model_cls: SQLModel class to query
             *where: WHERE conditions
+            order_by: Optional 排序键（如 ``Model.created_at``），原实现缺失，现补齐
             limit: Optional limit for results
             offset: Optional offset for results
+            for_update: 是否加 ``FOR UPDATE`` 行锁（并发 claim/lease 场景）
+            skip_locked: 配合 for_update，跳过已被锁定的行（``SKIP LOCKED``），避免阻塞
             session: Optional AsyncSession to use, defaults to self._session
 
         Returns:
@@ -264,12 +286,46 @@ class RDBMS:
         """
         target_session = session or self._session
         statement = select(model_cls).where(*where)
+        if order_by is not None:
+            statement = statement.order_by(order_by)
         if limit:
             statement = statement.limit(limit)
         if offset:
             statement = statement.offset(offset)
+        if for_update:
+            statement = statement.with_for_update(skip_locked=skip_locked)
         result = await target_session.execute(statement)
-        return result.scalars().all()
+        return list(result.scalars().all())
+
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(2),
+        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+    )
+    async def get_one(
+        self,
+        model_cls: type[TSQLModel],
+        *where,
+        order_by=None,
+        for_update: bool = False,
+        skip_locked: bool = False,
+        session: AsyncSession | None = None,
+    ) -> TSQLModel | None:
+        """查询单条记录（取首条匹配），常用于 claim/lease 场景。
+
+        是 ``get_by_filter(limit=1)`` 的便捷封装，返回单实体或 None。
+        支持 ``for_update``/``skip_locked`` 以实现并发安全的「领取下一条」语义。
+        """
+        rows = await self.get_by_filter(
+            model_cls,
+            *where,
+            order_by=order_by,
+            limit=1,
+            for_update=for_update,
+            skip_locked=skip_locked,
+            session=session,
+        )
+        return rows[0] if rows else None
 
     @retry(
         stop=stop_after_attempt(5),
