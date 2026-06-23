@@ -6,6 +6,8 @@
 @Updated :   2025/06/22 - Added DatabaseSessionPort interface support
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -15,7 +17,6 @@ import sqlalchemy
 import sqlalchemy.exc
 import tenacity
 from pydantic import BaseModel
-from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.engine.cursor import CursorResult
 from sqlalchemy.engine.result import Result
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -335,9 +336,13 @@ class RDBMS:
     async def upsert(self, obj: SQLModel, sets: list[str], session: AsyncSession | None = None, commit: bool = True):
         """Insert or update an object (UPSERT operation).
 
+        运行时自动检测方言：
+        - PostgreSQL: INSERT ... ON CONFLICT (pk) DO UPDATE SET ...
+        - MySQL:       INSERT ... ON DUPLICATE KEY UPDATE ...（原路径）
+
         Args:
             obj: SQLModel object to upsert
-            sets: List of fields to update on duplicate key
+            sets: List of fields to update on duplicate key (仅 PG 方言使用)
             session: Optional AsyncSession to use, defaults to self._session
             commit: Whether to auto-commit (default True, set to False in transactions)
 
@@ -353,8 +358,12 @@ class RDBMS:
                 await rdbms.upsert(obj, ["field1"], session=session, commit=False)
         """
         target_session = session or self._session
-        stm = insert(obj.__class__).on_duplicate_key_update(obj.model_dump())
-        await target_session.execute(stm)
+        dialect = target_session.bind.dialect.name
+
+        if dialect == "postgresql":
+            await self._upsert_pg(obj, sets, target_session)
+        else:
+            await self._upsert_mysql(obj, target_session)
 
         if commit:
             await target_session.commit()
@@ -495,6 +504,66 @@ class RDBMS:
                 await rdbms.increment_atomic(Model, "counter", 1, session=session, commit=False, id="key")
         """
         target_session = session or self._session
+        dialect = target_session.bind.dialect.name
+
+        if dialect == "postgresql":
+            await self._increment_pg(model_cls, usage_field, usage, target_session, **where)
+        else:
+            await self._increment_mysql(model_cls, usage_field, usage, target_session, **where)
+
+        if commit:
+            await target_session.commit()
+
+    async def _upsert_pg(self, obj: SQLModel, sets: list[str], session: AsyncSession) -> None:
+        """PostgreSQL: INSERT ... ON CONFLICT DO UPDATE"""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        pk_names = self.get_primary_key_names(obj.__class__)
+        values = obj.model_dump()
+        set_values = {k: values[k] for k in sets if k in values}
+
+        # ON CONFLICT 只用主键列
+        stmt = pg_insert(obj.__class__).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=pk_names,
+            set_=set_values,
+        )
+        await session.execute(stmt)
+
+    async def _upsert_mysql(self, obj: SQLModel, session: AsyncSession) -> None:
+        """MySQL: INSERT ... ON DUPLICATE KEY UPDATE（原实现）"""
+        from sqlalchemy import insert
+
+        stm = insert(obj.__class__).on_duplicate_key_update(obj.model_dump())
+        await session.execute(stm)
+
+    async def _increment_pg(
+        self, model_cls: type[TSQLModel], usage_field: str, usage: int,
+        session: AsyncSession, **where
+    ) -> None:
+        """PostgreSQL: INSERT ... ON CONFLICT DO UPDATE ... RETURNING"""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        pk_names = self.get_primary_key_names(model_cls)
+        values = {**where, usage_field: usage}
+
+        stmt = pg_insert(model_cls).values(**values)
+        # 冲突时累加 usage_field
+        set_expr = {usage_field: getattr(model_cls, usage_field) + usage}
+        for k in where:
+            if k not in pk_names:
+                set_expr[k] = values[k]
+        stmt = stmt.on_conflict_do_update(
+            index_elements=pk_names,
+            set_=set_expr,
+        )
+        await session.execute(stmt)
+
+    async def _increment_mysql(
+        self, model_cls: type[TSQLModel], usage_field: str, usage: int,
+        session: AsyncSession, **where
+    ) -> None:
+        """MySQL: INSERT ... ON DUPLICATE KEY UPDATE（原实现）"""
         columns = [f for f in where.keys()]
         columns.append(usage_field)
         sql = sqlalchemy.text(f"""
@@ -504,7 +573,4 @@ class RDBMS:
     """)
         p = where
         p[usage_field] = usage
-        await target_session.execute(sql, params=p)
-
-        if commit:
-            await target_session.commit()
+        await session.execute(sql, params=p)
