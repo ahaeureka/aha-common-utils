@@ -201,6 +201,11 @@ class RDBMS:
 
         if commit:
             await target_session.commit()
+        else:
+            # SQLAlchemy 2.0 的 ``Session.refresh()`` 不会自动 flush pending 实例，
+            # 不显式 flush 时 ``refresh`` 会抛 ``Instance is not persistent``。
+            # commit=True 路径下 commit 自带 flush，无需重复。
+            await target_session.flush()
 
         await target_session.refresh(obj)
         return obj
@@ -368,7 +373,16 @@ class RDBMS:
         if commit:
             await target_session.commit()
 
-        await target_session.refresh(obj)
+        # Raw-SQL upsert（_upsert_pg / _upsert_mysql）不会把对象纳入 session 的
+        # identity map。若 identity map 已缓存同主键的旧实例（例如先 insert 再
+        # upsert 同 id），session.get 会返回陈旧缓存。expire_all 强制下次访问从 DB
+        # 重新加载，保证返回最新行数据。
+        target_session.expire_all()
+        pk_names = self.get_primary_key_names(obj.__class__)
+        pk_val = getattr(obj, pk_names[0])
+        row = await target_session.get(obj.__class__, pk_val)
+        if row is not None:
+            obj.__dict__.update({k: v for k, v in row.__dict__.items() if not k.startswith("_")})
         return obj
 
     @retry(
@@ -510,6 +524,10 @@ class RDBMS:
             await self._increment_pg(model_cls, usage_field, usage, target_session, **where)
         else:
             await self._increment_mysql(model_cls, usage_field, usage, target_session, **where)
+
+        # 原子累加走 raw SQL，绕过 ORM identity map。若 session 已缓存同主键实例，
+        # 后续 get() 会返回陈旧值。expire_all 强制下次访问从 DB 重新加载。
+        target_session.expire_all()
 
         if commit:
             await target_session.commit()
