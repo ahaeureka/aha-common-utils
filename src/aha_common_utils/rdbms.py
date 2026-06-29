@@ -556,8 +556,7 @@ class RDBMS:
         await session.execute(stm)
 
     async def _increment_pg(
-        self, model_cls: type[TSQLModel], usage_field: str, usage: int,
-        session: AsyncSession, **where
+        self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession, **where
     ) -> None:
         """PostgreSQL: INSERT ... ON CONFLICT DO UPDATE ... RETURNING"""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -578,8 +577,7 @@ class RDBMS:
         await session.execute(stmt)
 
     async def _increment_mysql(
-        self, model_cls: type[TSQLModel], usage_field: str, usage: int,
-        session: AsyncSession, **where
+        self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession, **where
     ) -> None:
         """MySQL: INSERT ... ON DUPLICATE KEY UPDATE（原实现）"""
         columns = [f for f in where.keys()]
