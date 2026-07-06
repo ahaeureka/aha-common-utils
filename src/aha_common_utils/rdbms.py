@@ -382,7 +382,9 @@ class RDBMS:
         pk_val = getattr(obj, pk_names[0])
         row = await target_session.get(obj.__class__, pk_val)
         if row is not None:
-            obj.__dict__.update({k: v for k, v in row.__dict__.items() if not k.startswith("_")})
+            for k, v in row.__dict__.items():
+                if not k.startswith("_"):
+                    setattr(obj, k, v)
         return obj
 
     @retry(
@@ -552,7 +554,7 @@ class RDBMS:
         """MySQL: INSERT ... ON DUPLICATE KEY UPDATE（原实现）"""
         from sqlalchemy import insert
 
-        stm = insert(obj.__class__).on_duplicate_key_update(obj.model_dump())
+        stm = insert(obj.__class__).on_duplicate_key_update(obj.model_dump())  # type: ignore[attr-defined]
         await session.execute(stm)
 
     async def _increment_pg(
