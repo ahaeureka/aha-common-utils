@@ -1,10 +1,12 @@
 """Tests for ConfigStore dotenv vs process environment precedence.
 
-Validates the four required contracts:
-1. Environment-specific dotenv overrides base dotenv
-2. Pre-existing process key beats both dotenv files
-3. Pre-existing empty-string process key is also restored
-4. Unrelated process key is left unchanged
+Validates the required contracts:
+1. Base .env is loaded for local dotenv defaults
+2. .env.local overrides base .env
+3. Environment-specific dotenv overrides base dotenv
+4. Pre-existing process key beats all dotenv files
+5. Pre-existing empty-string process key is also restored
+6. Unrelated process key is left unchanged
 """
 
 from pathlib import Path
@@ -19,11 +21,52 @@ class ExampleConfig(BaseParameters):
     EXAMPLE_VALUE: str = "default"
 
 
-# ── Contract 1: env-specific dotenv overrides base dotenv ────────────────
+def _write_env_placeholder_config(base_dir: Path) -> None:
+    """Write a minimal TOML config that reads EXAMPLE_VALUE from dotenv/process env."""
+    (base_dir / "config.toml").write_text('EXAMPLE_VALUE = "${env:EXAMPLE_VALUE:-default}"\n', encoding="utf-8")
+
+
+# ── Contract 1: base .env is loaded ──────────────────────────────────────
+
+
+def test_base_dotenv_is_loaded(tmp_path: Path, monkeypatch) -> None:
+    """A project-root .env file provides local dotenv defaults."""
+    _write_env_placeholder_config(tmp_path)
+    (tmp_path / ".env").write_text("EXAMPLE_VALUE=base-env\n", encoding="utf-8")
+
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.delenv("EXAMPLE_VALUE", raising=False)
+
+    store = ConfigStore()
+    cfg = store.load(ExampleConfig, base_dir=tmp_path)
+
+    assert cfg.EXAMPLE_VALUE == "base-env"
+
+
+# ── Contract 2: .env.local overrides base .env ───────────────────────────
+
+
+def test_env_local_overrides_base_dotenv(tmp_path: Path, monkeypatch) -> None:
+    """.env.local values win over lower-priority .env values."""
+    _write_env_placeholder_config(tmp_path)
+    (tmp_path / ".env").write_text("EXAMPLE_VALUE=base-env\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=local-dotenv\n", encoding="utf-8")
+
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.delenv("EXAMPLE_VALUE", raising=False)
+
+    store = ConfigStore()
+    cfg = store.load(ExampleConfig, base_dir=tmp_path)
+
+    assert cfg.EXAMPLE_VALUE == "local-dotenv"
+
+
+# ── Contract 3: env-specific dotenv overrides base dotenv ────────────────
 
 
 def test_environment_local_dotenv_overrides_base_dotenv(tmp_path: Path, monkeypatch) -> None:
     """.env.<ENV>.local values win over .env.local when both define the same key."""
+    _write_env_placeholder_config(tmp_path)
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=base-dotenv\n", encoding="utf-8")
     (tmp_path / ".env.test.local").write_text("EXAMPLE_VALUE=env-specific-dotenv\n", encoding="utf-8")
 
@@ -37,11 +80,12 @@ def test_environment_local_dotenv_overrides_base_dotenv(tmp_path: Path, monkeypa
     assert cfg.EXAMPLE_VALUE == "env-specific-dotenv"
 
 
-# ── Contract 2: pre-existing process key beats both dotenv files ─────────
+# ── Contract 4: pre-existing process key beats all dotenv files ──────────
 
 
 def test_process_env_beats_dotenv_files(tmp_path: Path, monkeypatch) -> None:
     """A process env value set before load() is never overwritten by dotenv."""
+    _write_env_placeholder_config(tmp_path)
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=base-dotenv\n", encoding="utf-8")
     (tmp_path / ".env.test.local").write_text("EXAMPLE_VALUE=env-specific-dotenv\n", encoding="utf-8")
 
@@ -54,11 +98,12 @@ def test_process_env_beats_dotenv_files(tmp_path: Path, monkeypatch) -> None:
     assert cfg.EXAMPLE_VALUE == "process-wins"
 
 
-# ── Contract 3: pre-existing empty string is restored ────────────────────
+# ── Contract 5: pre-existing empty string is restored ────────────────────
 
 
 def test_process_empty_string_is_restored_after_dotenv(tmp_path: Path, monkeypatch) -> None:
     """A pre-existing empty string in process env is restored after dotenv loading."""
+    _write_env_placeholder_config(tmp_path)
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=dotenv-value\n", encoding="utf-8")
 
     monkeypatch.setenv("APP_ENV", "test")
@@ -71,11 +116,12 @@ def test_process_empty_string_is_restored_after_dotenv(tmp_path: Path, monkeypat
     assert cfg.EXAMPLE_VALUE == ""
 
 
-# ── Contract 4: unrelated process key is left unchanged ──────────────────
+# ── Contract 6: unrelated process key is left unchanged ──────────────────
 
 
 def test_unrelated_process_key_preserved(tmp_path: Path, monkeypatch) -> None:
     """Process env keys not in any dotenv file are preserved unchanged."""
+    _write_env_placeholder_config(tmp_path)
     (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=dotenv\n", encoding="utf-8")
 
     monkeypatch.setenv("APP_ENV", "test")

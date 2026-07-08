@@ -119,9 +119,10 @@ store.save({"debug": True}, "config.toml", path="app")
 | 1（最低） | 代码默认值 | `BaseParameters` 子类中声明的字段默认值 | ✅ |
 | 2 | `config.toml` | TOML 基础非敏感配置 | ✅ |
 | 3 | `config.<APP_ENV>.toml` | TOML 环境专属覆盖 | ✅ |
-| 4 | `.env.local` | 通用本地敏感值（密码/API Key） | ❌ |
-| 5 | `.env.<APP_ENV>.local` | 环境专属敏感值 | ❌ |
-| 6（最高） | 进程环境变量 | 容器/CI 注入，最终覆盖 | — |
+| 4 | `.env` | dotenv 本地默认值（兼容标准 dotenv 工具） | ❌ |
+| 5 | `.env.local` | 通用本地敏感值（密码/API Key） | ❌ |
+| 6 | `.env.<APP_ENV>.local` | 环境专属敏感值 | ❌ |
+| 7（最高） | 进程环境变量 | 容器/CI 注入，最终覆盖 | — |
 
 > 环境变量支持 `SECTION_FIELD` 命名模式自动路由到嵌套模型。例如 `LLM_API_KEY` 自动映射到 `llm.api_key`，`EMBEDDING_OPENAI_BASE_URL` 自动映射到 `embedding.openai.base_url`。无需手动配置 `env_prefix`。
 
@@ -240,7 +241,8 @@ export LLM_API_KEY=sk-prod-xxxxxxxx
 | `config.yml` | YAML | 基础默认值（`config.yaml` 不存在时使用） |
 | `config.<APP_ENV>.yaml` | YAML | 环境专属覆盖 |
 | `config.<APP_ENV>.yml` | YAML | 环境专属覆盖（`.yaml` 不存在时使用） |
-| `.env.local` | dotenv | 通用敏感值（⚠️ 不提交版本库） |
+| `.env` | dotenv | 本地默认值（⚠️ 不提交版本库） |
+| `.env.local` | dotenv | 通用敏感值（优先级高于 `.env`，⚠️ 不提交版本库） |
 | `.env.<APP_ENV>.local` | dotenv | 环境专属敏感值（优先级高于 `.env.local`） |
 
 所有文件均为 **可选**。只存在的文件才会被加载，不存在的文件会被安静跳过。
@@ -427,7 +429,7 @@ raw = store.raw_data  # TOML + YAML 原始 dict（模型构造前）
 加载流程：
 1. 发现配置文件（`config.toml` → `config.<ENV>.toml`）
 2. 解析并合并（后者覆盖前者，嵌套 dict 递归合并）
-3. 加载 `.env.local` / `.env.<ENV>.local` 到进程环境变量
+3. 加载 `.env` / `.env.local` / `.env.<ENV>.local` 到进程环境变量
 4. 解析 dict 中的 `${env:VAR:-default}` 环境变量插值
 5. 应用进程环境变量覆盖（最高优先级，自动类型强制）
 6. 构造并返回模型实例
