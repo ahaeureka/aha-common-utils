@@ -9,9 +9,10 @@ Priority (low to high):
 1. Code defaults (model field defaults)
 2. ``config.yaml`` / ``config.yml`` + ``config.<ENV>.yaml`` / ``config.<ENV>.yml``
 3. ``config.toml`` + ``config.<ENV>.toml``
-4. ``.env.local`` values (loaded into ``os.environ`` via dotenv, ``override=False``)
-5. ``.env.<ENV>.local`` values (loaded into ``os.environ`` via dotenv, ``override=False``)
-6. Process environment variables (top-level keys only, type-coerced)
+4. ``.env`` values (loaded into ``os.environ`` via dotenv, ``override=False``)
+5. ``.env.local`` values (loaded into ``os.environ`` via dotenv, ``override=True``)
+6. ``.env.<ENV>.local`` values (loaded into ``os.environ`` via dotenv, ``override=True``)
+7. Process environment variables (top-level keys only, type-coerced)
 """
 
 from __future__ import annotations
@@ -224,6 +225,19 @@ def _build_yaml_config_files(
     return existing
 
 
+def _build_base_env_file(
+    base_dir: Path | None = None,
+) -> Path | None:
+    """Return path to ``.env`` if it exists, otherwise ``None``."""
+    if base_dir is None:
+        base_dir = _find_project_root()
+    env_file = base_dir / ".env"
+    if env_file.is_file():
+        logger.debug("[sensitive_env] found .env: %s", env_file)
+        return env_file
+    return None
+
+
 def _build_sensitive_env_file(
     base_dir: Path | None = None,
 ) -> Path | None:
@@ -317,9 +331,10 @@ class ConfigStore:
         1. Code defaults (model field defaults)
         2. YAML files (config.yaml + config.<ENV>.yaml)
         3. TOML files (config.toml + config.<ENV>.toml)
-        4. ``.env.local`` (loaded into ``os.environ``, ``override=False``)
-        5. ``.env.<ENV>.local`` (loaded into ``os.environ``, ``override=False``)
-        6. Process environment variables (top-level keys, type-coerced)
+        4. ``.env`` (loaded into ``os.environ``, ``override=False``)
+        5. ``.env.local`` (loaded into ``os.environ``, ``override=True``)
+        6. ``.env.<ENV>.local`` (loaded into ``os.environ``, ``override=True``)
+        7. Process environment variables (top-level keys, type-coerced)
 
         Args:
             config_class: A ``BaseParameters`` subclass defining the config schema.
@@ -365,7 +380,7 @@ class ConfigStore:
         # 4. Preserve raw merged dict
         self._raw_data = dict(merged)
 
-        # 5. Load .env.local + .env.<ENV>.local into os.environ (override=False)
+        # 5. Load .env + .env.local + .env.<ENV>.local into os.environ
         self._load_env_files(base_dir, app_env)
 
         # 6. Walk merged dict and resolve ${env:VAR:-default} patterns
@@ -594,12 +609,14 @@ class ConfigStore:
 
     @staticmethod
     def _load_env_files(base_dir: Path, app_env: str) -> None:
-        """Load ``.env.local`` and ``.env.<ENV>.local`` into ``os.environ``.
+        """Load ``.env``, ``.env.local``, and ``.env.<ENV>.local`` into ``os.environ``.
 
         Snapshots the process environment before loading any dotenv files,
         then restores all pre-existing keys (including empty strings) after
         loading.  This ensures that:
 
+        - ``.env`` provides low-priority local defaults.
+        - ``.env.local`` can override ``.env`` for local sensitive values.
         - Environment-specific dotenv can override base dotenv
           (``.env.<ENV>.local`` loaded with ``override=True``).
         - Process environment variables always retain highest priority,
@@ -612,10 +629,16 @@ class ConfigStore:
         # Snapshot the current process environment before any dotenv loading
         pre_existing = dict(os.environ)
 
-        # .env.local (lower priority)
+        # .env (lowest dotenv priority)
+        env_file = _build_base_env_file(base_dir=base_dir)
+        if env_file is not None:
+            load_env_file(env_file, override=False)
+            logger.debug("[ConfigStore] loaded env file: %s", env_file.name)
+
+        # .env.local (higher priority than .env)
         env_local = _build_sensitive_env_file(base_dir=base_dir)
         if env_local is not None:
-            load_env_file(env_local, override=False)
+            load_env_file(env_local, override=True)
             logger.debug("[ConfigStore] loaded env file: %s", env_local.name)
 
         # .env.<ENV>.local (higher priority, overrides .env.local)
