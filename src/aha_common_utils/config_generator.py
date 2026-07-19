@@ -48,11 +48,11 @@ class ParamScanner:
     """参数扫描器 - 扫描类的 __init__ 参数"""
 
     @staticmethod
-    def scan_init_params(cls: type) -> dict[str, dict[str, Any]]:
+    def scan_init_params(target_cls: type) -> dict[str, dict[str, Any]]:
         """扫描类的 __init__ 参数（仅扫描带 ParamMeta 注解的配置参数）
 
         Args:
-            cls: 要扫描的类
+            target_cls: 要扫描的类
 
         Returns:
             参数信息字典，格式: {
@@ -73,9 +73,9 @@ class ParamScanner:
 
         try:
             # 获取 __init__ 方法签名
-            sig = inspect.signature(cls.__init__)  # type: ignore[misc]
+            sig = inspect.signature(target_cls.__init__)  # type: ignore[misc]
             # 获取类型注解
-            type_hints = get_type_hints(cls.__init__, include_extras=True)  # type: ignore[misc]
+            type_hints = get_type_hints(target_cls.__init__, include_extras=True)  # type: ignore[misc]
 
             for param_name, param in sig.parameters.items():
                 if param_name == "self":
@@ -88,7 +88,7 @@ class ParamScanner:
                 # 只处理带 ParamMeta 注解的参数（配置项）
                 if param_meta is None:
                     logger.debug(
-                        f"[ParamScanner] {cls.__name__}.{param_name}: "
+                        f"[ParamScanner] {target_cls.__name__}.{param_name}: "
                         f"Skipped (no ParamMeta, treated as dependency injection parameter)"
                     )
                     continue
@@ -109,25 +109,25 @@ class ParamScanner:
                 }
 
                 logger.debug(
-                    f"[ParamScanner] {cls.__name__}.{param_name}: "
+                    f"[ParamScanner] {target_cls.__name__}.{param_name}: "
                     f"type={param_type}, default={default_value}, required={default_value is ...}, "
                     f"meta={param_meta.description if param_meta else None}"
                 )
 
         except Exception as e:
-            logger.warning(f"[ParamScanner] Failed to scan {cls.__name__}.__init__: {e}")
+            logger.warning(f"[ParamScanner] Failed to scan {target_cls.__name__}.__init__: {e}")
 
         return params_info
 
     @staticmethod
-    def scan_all_params(cls: type) -> dict[str, dict[str, Any]]:
+    def scan_all_params(target_cls: type) -> dict[str, dict[str, Any]]:
         """扫描类的 __init__ 方法的所有参数（包括依赖注入参数）
 
         与 scan_init_params 不同，此方法扫描所有参数，不过滤 ParamMeta。
         用于依赖注入系统识别依赖类型。
 
         Args:
-            cls: 要扫描的类
+            target_cls: 要扫描的类
 
         Returns:
             参数信息字典，格式：
@@ -145,9 +145,9 @@ class ParamScanner:
 
         try:
             # 获取 __init__ 方法签名
-            sig = inspect.signature(cls.__init__)  # type: ignore[misc]
+            sig = inspect.signature(target_cls.__init__)  # type: ignore[misc]
             # 获取类型注解
-            type_hints = get_type_hints(cls.__init__, include_extras=True)  # type: ignore[misc]
+            type_hints = get_type_hints(target_cls.__init__, include_extras=True)  # type: ignore[misc]
 
             for param_name, param in sig.parameters.items():
                 if param_name == "self":
@@ -173,13 +173,13 @@ class ParamScanner:
                 }
 
                 logger.debug(
-                    f"[ParamScanner.scan_all_params] {cls.__name__}.{param_name}: "
+                    f"[ParamScanner.scan_all_params] {target_cls.__name__}.{param_name}: "
                     f"type={param_type}, default={default_value}, required={default_value is ...}, "
                     f"has_meta={param_meta is not None}"
                 )
 
         except Exception as e:
-            logger.warning(f"[ParamScanner] Failed to scan all params of {cls.__name__}.__init__: {e}")
+            logger.warning(f"[ParamScanner] Failed to scan all params of {target_cls.__name__}.__init__: {e}")
 
         return params_info
 

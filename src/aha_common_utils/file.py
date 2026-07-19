@@ -1,26 +1,32 @@
 import base64
 import hashlib
+import importlib
 import io
 import mimetypes
 import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-import filetype
 import numpy as np
 from PIL import Image
 
 try:
-    import imagehash
+    _filetype: Any = importlib.import_module("filetype")
 except ImportError:  # pragma: no cover - optional dependency
-    imagehash = None
+    _filetype = None
+
+_imagehash: Any
+try:
+    import imagehash as _imagehash
+except ImportError:  # pragma: no cover - optional dependency
+    _imagehash = None
 
 try:
-    import magic
+    _magic: Any = importlib.import_module("magic")
 except ImportError:  # pragma: no cover - optional dependency
-    magic = None
+    _magic = None
 
 FileType = Literal[
     "pdf",
@@ -150,16 +156,16 @@ class FileHelper:
         :param file_path: The path of the file.
         :return: The MIME type.
         """
-        mime_type = filetype.guess(file_path)
+        mime_type = _filetype.guess(file_path) if _filetype is not None else None
         if mime_type:
             return mime_type.mime
         guessed_mime_type, _ = mimetypes.guess_type(file_path)
         if guessed_mime_type:
             return guessed_mime_type
-        if magic is not None:
+        if _magic is not None:
             with open(file_path, "rb") as file:
                 file_content = file.read(2048)
-                return magic.from_buffer(file_content, mime=True) or "application/octet-stream"
+                return _magic.from_buffer(file_content, mime=True) or "application/octet-stream"
         return "application/octet-stream"
 
     @staticmethod
@@ -272,7 +278,7 @@ class FileHelper:
             with Image.open(file_path) as img:
                 return img.size
         elif FileHelper.is_pdf(file_path):
-            from PyPDF2 import PdfReader
+            from PyPDF2 import PdfReader  # type: ignore[import-not-found]
 
             reader = PdfReader(file_path)
             page = reader.pages[0]
@@ -489,7 +495,7 @@ class FileHelper:
         """
         FileHelper._require_imagehash()
         image = FileHelper.get_image(src)
-        phash = imagehash.phash(image, hash_size=hash_size, highfreq_factor=highfreq_factor)
+        phash = _imagehash.phash(image, hash_size=hash_size, highfreq_factor=highfreq_factor)
         return str(phash)
 
     @staticmethod
@@ -534,7 +540,7 @@ class FileHelper:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(frame_rgb)
                     FileHelper._require_imagehash()
-                    phash = imagehash.phash(image, hash_size=hash_size, highfreq_factor=highfreq_factor)
+                    phash = _imagehash.phash(image, hash_size=hash_size, highfreq_factor=highfreq_factor)
                     phashes.append(str(phash))
 
             return phashes
@@ -624,7 +630,7 @@ class FileHelper:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(frame_rgb)
                     FileHelper._require_imagehash()
-                    phash = imagehash.phash(image, hash_size=hash_size, highfreq_factor=highfreq_factor)
+                    phash = _imagehash.phash(image, hash_size=hash_size, highfreq_factor=highfreq_factor)
                     # Convert pHash to integer for SimHash aggregation
                     phash_values.append(int(str(phash), 16))
 
@@ -792,7 +798,7 @@ class FileHelper:
 
     @staticmethod
     def _require_imagehash() -> None:
-        if imagehash is None:
+        if _imagehash is None:
             raise ImportError("imagehash is required for perceptual image/video hashing")
 
     # @staticmethod

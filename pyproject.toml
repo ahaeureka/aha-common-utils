@@ -30,6 +30,7 @@ dependencies = [
     "imagehash>=4.3.2",
     "tomlkit>=0.15.0",
     "tomli-w>=1.2.0",
+    "opencv-python>=5.0.0.93",
 ]
 
 [build-system]

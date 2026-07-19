@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -19,15 +20,20 @@ import tenacity
 from pydantic import BaseModel
 from sqlalchemy.engine.cursor import CursorResult
 from sqlalchemy.engine.result import Result
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_scoped_session
 from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel, select, update
 from tenacity import retry, stop_after_attempt, wait_fixed
+
+_RETRYABLE_DB_ERRORS = (
+    sqlalchemy.exc.OperationalError,
+)
 
 logging.basicConfig()
 logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
 TSQLModel = TypeVar("TSQLModel", bound="SQLModel")
+DatabaseSession = AsyncSession | async_scoped_session[AsyncSession]
 
 
 class JSONSerializer:
@@ -57,28 +63,28 @@ class RDBMS:
     - Integration with DatabaseSessionPort interface
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: DatabaseSession) -> None:
         """Initialize RDBMS with an existing AsyncSession instance.
 
         For new code, prefer using begin_tx() method to create sessions.
         """
         self._session = session
 
-    async def begin_tx(self) -> AsyncSession:
+    async def begin_tx(self) -> DatabaseSession:
         """Begin and return a new transaction session.
 
         This method is part of the DatabaseSessionPort interface.
         """
         return self._session
 
-    async def commit_tx(self, session: AsyncSession) -> None:
+    async def commit_tx(self, session: DatabaseSession) -> None:
         """Commit the transaction.
 
         This method is part of the DatabaseSessionPort interface.
         """
         await session.commit()
 
-    async def rollback_tx(self, session: AsyncSession) -> None:
+    async def rollback_tx(self, session: DatabaseSession) -> None:
         """Rollback the transaction.
 
         This method is part of the DatabaseSessionPort interface.
@@ -86,7 +92,7 @@ class RDBMS:
         await session.rollback()
 
     @asynccontextmanager
-    async def transaction(self, session: AsyncSession | None = None):
+    async def transaction(self, session: DatabaseSession | None = None):
         """Transaction context manager for automatic commit/rollback.
 
         Args:
@@ -112,7 +118,11 @@ class RDBMS:
             await target_session.rollback()
             raise
 
-    async def health_check(self, session: AsyncSession | None = None) -> bool:
+    @asynccontextmanager
+    async def session_scope(self):
+        yield self._session
+
+    async def health_check(self, session: DatabaseSession | None = None) -> bool:
         """Check if database connection is healthy.
 
         Args:
@@ -129,7 +139,7 @@ class RDBMS:
             logging.warning(f"Database health check failed: {e}")
             return False
 
-    async def execute_in_tx(self, func, *args, session: AsyncSession | None = None, **kwargs):
+    async def execute_in_tx(self, func, *args, session: DatabaseSession | None = None, **kwargs):
         """Execute a function within a transaction context.
 
         Args:
@@ -175,9 +185,9 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
-    async def insert(self, obj: SQLModel, session: AsyncSession | None = None, commit: bool = True):
+    async def insert(self, obj: SQLModel, session: DatabaseSession | None = None, commit: bool = True):
         """Insert a single object into the database.
 
         Args:
@@ -213,9 +223,9 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
-    async def batch_insert(self, objs: list[SQLModel], session: AsyncSession | None = None, commit: bool = True):
+    async def batch_insert(self, objs: list[SQLModel], session: DatabaseSession | None = None, commit: bool = True):
         """Insert multiple objects into the database.
 
         Args:
@@ -243,9 +253,9 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
-    async def get(self, model_cls: type[TSQLModel], pk: str, session: AsyncSession | None = None) -> TSQLModel | None:
+    async def get(self, model_cls: type[TSQLModel], pk: str, session: DatabaseSession | None = None) -> TSQLModel | None:
         """Get an object by primary key.
 
         Args:
@@ -262,7 +272,7 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
     async def get_by_filter(
         self,
@@ -273,7 +283,7 @@ class RDBMS:
         offset=None,
         for_update: bool = False,
         skip_locked: bool = False,
-        session: AsyncSession | None = None,
+        session: DatabaseSession | None = None,
     ) -> list[TSQLModel]:
         """Get objects by filter conditions.
 
@@ -306,7 +316,7 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
     async def get_one(
         self,
@@ -315,7 +325,7 @@ class RDBMS:
         order_by=None,
         for_update: bool = False,
         skip_locked: bool = False,
-        session: AsyncSession | None = None,
+        session: DatabaseSession | None = None,
     ) -> TSQLModel | None:
         """查询单条记录（取首条匹配），常用于 claim/lease 场景。
 
@@ -336,9 +346,9 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
-    async def upsert(self, obj: SQLModel, sets: list[str], session: AsyncSession | None = None, commit: bool = True):
+    async def upsert(self, obj: SQLModel, sets: list[str], session: DatabaseSession | None = None, commit: bool = True):
         """Insert or update an object (UPSERT operation).
 
         运行时自动检测方言：
@@ -390,11 +400,11 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
     async def list(
-        self, model_cls: type[TSQLModel], page, limit, *where, session: AsyncSession | None = None
-    ) -> tuple[list[TSQLModel], int]:
+        self, model_cls: type[TSQLModel], page, limit, *where, session: DatabaseSession | None = None
+    ) -> tuple[builtins.list[TSQLModel], int]:
         """List objects with pagination.
 
         Args:
@@ -419,14 +429,14 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
     async def update(
         self,
         model_cls: type[TSQLModel],
         updated: dict,
         *where,
-        session: AsyncSession | None = None,
+        session: DatabaseSession | None = None,
         commit: bool = True,
     ) -> CursorResult:
         """Update objects matching conditions.
@@ -469,9 +479,9 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
-    async def exec(self, statement: Executable, session: AsyncSession | None = None) -> Result:
+    async def exec(self, statement: Executable, session: DatabaseSession | None = None) -> Result:
         """Execute a statement and return result.
 
         Args:
@@ -487,14 +497,14 @@ class RDBMS:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_fixed(2),
-        retry=tenacity.retry_if_exception_type(sqlalchemy.exc.OperationalError),
+        retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
     async def increment_atomic(
         self,
         model_cls: type[TSQLModel],
         usage_field: str,
         usage: int,
-        session: AsyncSession | None = None,
+        session: DatabaseSession | None = None,
         commit: bool = True,
         **where,
     ):
@@ -534,7 +544,7 @@ class RDBMS:
         if commit:
             await target_session.commit()
 
-    async def _upsert_pg(self, obj: SQLModel, sets: list[str], session: AsyncSession) -> None:
+    async def _upsert_pg(self, obj: SQLModel, sets: builtins.list[str], session: DatabaseSession) -> None:
         """PostgreSQL: INSERT ... ON CONFLICT DO UPDATE"""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -550,7 +560,7 @@ class RDBMS:
         )
         await session.execute(stmt)
 
-    async def _upsert_mysql(self, obj: SQLModel, session: AsyncSession) -> None:
+    async def _upsert_mysql(self, obj: SQLModel, session: DatabaseSession) -> None:
         """MySQL: INSERT ... ON DUPLICATE KEY UPDATE（原实现）"""
         from sqlalchemy import insert
 
@@ -558,7 +568,7 @@ class RDBMS:
         await session.execute(stm)
 
     async def _increment_pg(
-        self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession, **where
+        self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: DatabaseSession, **where
     ) -> None:
         """PostgreSQL: INSERT ... ON CONFLICT DO UPDATE ... RETURNING"""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -579,7 +589,7 @@ class RDBMS:
         await session.execute(stmt)
 
     async def _increment_mysql(
-        self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: AsyncSession, **where
+        self, model_cls: type[TSQLModel], usage_field: str, usage: int, session: DatabaseSession, **where
     ) -> None:
         """MySQL: INSERT ... ON DUPLICATE KEY UPDATE（原实现）"""
         columns = [f for f in where.keys()]

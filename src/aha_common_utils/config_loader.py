@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -120,7 +120,7 @@ class ConfigLoader:
 
         # 动态创建配置类
         class DynamicMainSettings(main_config_class):  # type: ignore
-            model_config = SettingsConfigDict(**config_dict)  # type: ignore[misc]
+            model_config = SettingsConfigDict(**config_dict)  # type: ignore[misc,typeddict-item]
 
         # 实例化配置（合并文件数据和覆盖）
         init_data = {**(file_data or {}), **(config_overrides or {})}
@@ -163,7 +163,7 @@ class ConfigLoader:
 
         # 动态创建配置类
         class DynamicSettings(config_class):  # type: ignore
-            model_config = SettingsConfigDict(**config_dict)
+            model_config = SettingsConfigDict(**config_dict)  # type: ignore[typeddict-item]
 
         # 实例化配置
         if config_overrides:
@@ -228,10 +228,12 @@ class ConfigLoader:
         """
         from pydantic import Field
 
+        provider_registry: Any | None = None
         # 尝试导入 ProviderRegistry
         try:
             from .register import ProviderRegistry
 
+            provider_registry = ProviderRegistry
             has_provider_registry = True
         except ImportError:
             has_provider_registry = False
@@ -259,16 +261,16 @@ class ConfigLoader:
             fields[config_name] = Field(default_factory=dict, description=metadata.get("description", ""))
 
         # 3. 从 ProviderRegistry 收集自动生成的配置类
-        if has_provider_registry:
+        if has_provider_registry and provider_registry is not None:
             # 获取所有 provider 组的配置名称
-            provider_groups = ProviderRegistry.get_all_provider_groups()
+            provider_groups = cast(dict[str, str], provider_registry.get_all_provider_groups())
 
             # 按配置名称分组 provider
             configs_by_group: dict[str, dict[str, type]] = {}
 
-            for provider_name in ProviderRegistry.available_providers():
-                config_cls = ProviderRegistry.get_config_class(provider_name)
-                base_class_name = ProviderRegistry.get_base_class_for_provider(provider_name)
+            for provider_name in provider_registry.available_providers():
+                config_cls = provider_registry.get_config_class(provider_name)
+                base_class_name = provider_registry.get_base_class_for_provider(provider_name)
 
                 if config_cls and base_class_name:
                     # 从 provider 组获取配置名称

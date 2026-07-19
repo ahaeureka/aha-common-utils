@@ -10,6 +10,7 @@ Validates the required contracts:
 """
 
 from pathlib import Path
+from typing import Any, cast
 
 from aha_common_utils.config_base import BaseParameters
 from aha_common_utils.config_store import ConfigStore
@@ -26,6 +27,12 @@ def _write_env_placeholder_config(base_dir: Path) -> None:
     (base_dir / "config.toml").write_text('EXAMPLE_VALUE = "${env:EXAMPLE_VALUE:-default}"\n', encoding="utf-8")
 
 
+def _example_value(cfg: BaseParameters) -> str:
+    """Return the dynamically generated config field for pyright-friendly tests."""
+
+    return cast(str, cast(Any, cfg).EXAMPLE_VALUE)
+
+
 # ── Contract 1: base .env is loaded ──────────────────────────────────────
 
 
@@ -40,7 +47,7 @@ def test_base_dotenv_is_loaded(tmp_path: Path, monkeypatch) -> None:
     store = ConfigStore()
     cfg = store.load(ExampleConfig, base_dir=tmp_path)
 
-    assert cfg.EXAMPLE_VALUE == "base-env"
+    assert _example_value(cfg) == "base-env"
 
 
 # ── Contract 2: .env.local overrides base .env ───────────────────────────
@@ -58,7 +65,7 @@ def test_env_local_overrides_base_dotenv(tmp_path: Path, monkeypatch) -> None:
     store = ConfigStore()
     cfg = store.load(ExampleConfig, base_dir=tmp_path)
 
-    assert cfg.EXAMPLE_VALUE == "local-dotenv"
+    assert _example_value(cfg) == "local-dotenv"
 
 
 # ── Contract 3: env-specific dotenv overrides base dotenv ────────────────
@@ -77,7 +84,7 @@ def test_environment_local_dotenv_overrides_base_dotenv(tmp_path: Path, monkeypa
     store = ConfigStore()
     cfg = store.load(ExampleConfig, base_dir=tmp_path)
 
-    assert cfg.EXAMPLE_VALUE == "env-specific-dotenv"
+    assert _example_value(cfg) == "env-specific-dotenv"
 
 
 # ── Contract 4: pre-existing process key beats all dotenv files ──────────
@@ -95,7 +102,7 @@ def test_process_env_beats_dotenv_files(tmp_path: Path, monkeypatch) -> None:
     store = ConfigStore()
     cfg = store.load(ExampleConfig, base_dir=tmp_path)
 
-    assert cfg.EXAMPLE_VALUE == "process-wins"
+    assert _example_value(cfg) == "process-wins"
 
 
 # ── Contract 5: pre-existing empty string is restored ────────────────────
@@ -113,7 +120,7 @@ def test_process_empty_string_is_restored_after_dotenv(tmp_path: Path, monkeypat
     cfg = store.load(ExampleConfig, base_dir=tmp_path)
 
     # Empty string is an explicit value — the field schema decides validity
-    assert cfg.EXAMPLE_VALUE == ""
+    assert _example_value(cfg) == ""
 
 
 # ── Contract 6: unrelated process key is left unchanged ──────────────────

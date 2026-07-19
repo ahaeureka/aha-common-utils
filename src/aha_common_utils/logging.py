@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from loguru import logger as _loguru_logger
+
 from .log import init_logging
-from .log import logger as _loguru_logger
 
 
 def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:

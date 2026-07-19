@@ -12,6 +12,12 @@ from typing import Any
 import typer
 
 
+def _normalize_envvar(envvar: str | Sequence[str] | None) -> str | list[str] | None:
+    if envvar is None or isinstance(envvar, str):
+        return envvar
+    return list(envvar)
+
+
 def Opt(
     *,
     help: str = "",
@@ -53,7 +59,7 @@ def Opt(
     return typer.Option(
         *param_decls,
         help=help,
-        envvar=envvar,
+        envvar=_normalize_envvar(envvar),
         show_default=show_default,
         hidden=hidden,
         prompt=prompt,
@@ -135,7 +141,7 @@ def EnvOpt(
     return typer.Option(
         *param_decls,
         help=help,
-        envvar=envvar,
+        envvar=_normalize_envvar(envvar),
         show_default=show_default,
         hidden=hidden,
         metavar=metavar,
@@ -181,7 +187,7 @@ def SecretOpt(
     return typer.Option(
         *param_decls,
         help=help,
-        envvar=envvar,
+        envvar=_normalize_envvar(envvar),
         hide_input=True,
         prompt=prompt,
         confirmation_prompt=confirmation_prompt,
