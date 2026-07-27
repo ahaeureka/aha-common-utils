@@ -30,6 +30,7 @@
 - [配置文件示例](#配置文件示例)
 - [常见问题](#常见问题)
 - [CLI 框架](#cli-框架)
+- [可复用运行时组件](docs/reusable-runtime-components.md)
 
 ---
 
