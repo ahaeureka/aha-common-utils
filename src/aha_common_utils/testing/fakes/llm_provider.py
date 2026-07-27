@@ -43,7 +43,7 @@ class FakeEmbeddingProvider(FailureMixin, EmbeddingProviderPort):
         self._query_task_descriptions = self.query_task_descriptions
         self.document_batch_calls: int = 0
 
-    async def embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
+    async def embed(self, texts: list[str]) -> list[EmbeddingVector]:
         self._raise_if_failed()
         self.requests.append(texts)
         self.texts.extend(texts)
@@ -51,6 +51,9 @@ class FakeEmbeddingProvider(FailureMixin, EmbeddingProviderPort):
         if self.vector is not None:
             return [list(self.vector) for _ in texts]
         return [[float(index + 1)] * self.dimension for index, _text in enumerate(texts)]
+
+    async def embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
+        return await self.embed(texts)
 
     async def embed_query(self, text: str, *, task_description: str = "") -> EmbeddingVector:
         self._raise_if_failed()
@@ -61,10 +64,7 @@ class FakeEmbeddingProvider(FailureMixin, EmbeddingProviderPort):
         return [1.0] * self.dimension
 
     async def embed_documents(self, texts: list[str]) -> list[EmbeddingVector]:
-        return await self.embed_texts(texts)
-
-    async def embed(self, texts: list[str]) -> list[EmbeddingVector]:
-        return await self.embed_documents(texts)
+        return await self.embed(texts)
 
     def reset(self) -> None:
         self.requests.clear()

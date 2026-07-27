@@ -3,7 +3,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from aha_common_utils.ports.types import EmbeddingVector, JsonObject, LLMMessage
+# The canonical rich EmbeddingProviderPort lives in ``embedding_provider``;
+# re-exported here for backward compatibility with existing imports.
+from aha_common_utils.ports.embedding_provider import EmbeddingProviderPort  # noqa: F401
+from aha_common_utils.ports.types import JsonObject, LLMMessage
 
 
 class LLMProviderPort(ABC):
@@ -19,18 +22,6 @@ class LLMProviderPort(ABC):
         max_tokens: int | None = None,
     ) -> JsonObject:
         """Return a JSON object for supplied chat messages."""
-
-    @abstractmethod
-    async def close(self) -> None:
-        """Release resources."""
-
-
-class EmbeddingProviderPort(ABC):
-    """Embedding provider contract."""
-
-    @abstractmethod
-    async def embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
-        """Embed a list of strings."""
 
     @abstractmethod
     async def close(self) -> None:

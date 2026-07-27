@@ -40,3 +40,24 @@ LLMContent = str | list[ContentBlock]
 class LLMMessage:
     role: LLMRole
     content: LLMContent
+
+
+@dataclass(frozen=True, slots=True)
+class GraphNode:
+    id: str
+    labels: tuple[str, ...]
+    properties: JsonObject = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class GraphEdge:
+    from_id: str
+    to_id: str
+    rel_type: str
+    properties: JsonObject = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class GraphTraversal:
+    nodes: list[GraphNode] = field(default_factory=list)
+    edges: list[GraphEdge] = field(default_factory=list)

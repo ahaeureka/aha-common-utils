@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
-from aha_common_utils.ports.llm_provider import EmbeddingProviderPort
+from aha_common_utils.ports.embedding_provider import EmbeddingProviderPort
+from aha_common_utils.ports.provider_capability import ExecutionMode, ProviderCapability
 from aha_common_utils.ports.types import EmbeddingVector
 from aha_common_utils.register import ProviderRegistry
 
@@ -23,7 +24,13 @@ class OpenAIEmbeddingClient(Protocol):
 
 @ProviderRegistry.register("openai-compatible-embedding", singleton=False)
 class OpenAICompatibleEmbeddingProvider(EmbeddingProviderPort):
-    """EmbeddingProviderPort backed by an OpenAI-compatible embeddings API."""
+    """EmbeddingProviderPort backed by an OpenAI-compatible embeddings API.
+
+    Implements the rich contract: ``embed`` is the order-preserving batch
+    primitive, ``embed_query`` applies a Qwen3-style instruction prefix when
+    a task description is supplied, and ``embed_documents`` embeds without a
+    prefix.
+    """
 
     def __init__(
         self,
@@ -46,7 +53,31 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProviderPort):
         """Return the configured embedding model name."""
         return self._model
 
-    async def embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
+    @property
+    def capability(self) -> ProviderCapability:
+        return ProviderCapability(
+            supported_modes=(ExecutionMode.ONLINE_MULTI_INPUT,),
+            max_items_per_batch=100,
+            max_tokens_per_batch=64000,
+        )
+
+    async def embed_query(
+        self,
+        text: str,
+        *,
+        task_description: str = "",
+    ) -> EmbeddingVector:
+        """Embed a single query with optional instruction prefix."""
+        if task_description:
+            text = self._make_instruct(task_description, text)
+        results = await self.embed([text])
+        return results[0] if results else [0.0]
+
+    async def embed_documents(self, texts: list[str]) -> list[EmbeddingVector]:
+        """Embed document texts — no instruction prefix by convention."""
+        return await self.embed(texts)
+
+    async def embed(self, texts: list[str]) -> list[EmbeddingVector]:
         """Embed input texts and preserve caller input order."""
         if not texts:
             return []

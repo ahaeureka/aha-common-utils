@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from aha_common_utils.ports.llm_provider import EmbeddingProviderPort, LLMProviderPort
+from aha_common_utils.ports.embedding_provider import EmbeddingProviderPort
+from aha_common_utils.ports.llm_provider import LLMProviderPort
 from aha_common_utils.runtime.provider_registry import (
     UnknownProviderError,
     available_provider_names,

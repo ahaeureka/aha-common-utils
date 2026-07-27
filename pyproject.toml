@@ -33,6 +33,7 @@ dependencies = [
     "opencv-python>=5.0.0.93",
     "redis>=5.0.0",
     "openai>=2.0.0",
+    "llama-cpp-python>=0.3.33",
 ]
 
 [build-system]

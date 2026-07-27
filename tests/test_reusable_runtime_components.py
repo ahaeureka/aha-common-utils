@@ -592,7 +592,7 @@ async def test_embedding_provider_registry_registers_and_creates_provider() -> N
             self.model = model
             self.request_timeout_seconds = request_timeout_seconds
 
-        async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
             return [[float(index)] for index, _ in enumerate(texts)]
 
         async def close(self) -> None:
@@ -615,7 +615,7 @@ async def test_embedding_provider_registry_registers_and_creates_provider() -> N
     assert provider.base_url == "https://embedding.example.test"
     assert provider.model == "embedding-a"
     assert provider.request_timeout_seconds == 9.0
-    assert await provider.embed_texts(["a", "b"]) == [[0.0], [1.0]]
+    assert await provider.embed(["a", "b"]) == [[0.0], [1.0]]
 
 
 def test_typed_provider_registry_helpers_create_and_list_instances() -> None:
@@ -796,7 +796,7 @@ async def test_openai_compatible_embedding_provider_preserves_response_index_ord
     client = FakeClient()
     provider = OpenAICompatibleEmbeddingProvider(base_url="https://emb.example", api_key="secret", model="emb", client=client)
 
-    assert await provider.embed_texts(["first", "second"]) == [[1.0], [2.0]]
+    assert await provider.embed_documents(["first", "second"]) == [[1.0], [2.0]]
     await provider.close()
     assert client.closed is True
 
@@ -838,9 +838,9 @@ async def test_openai_compatible_embedding_provider_rejects_duplicate_or_missing
     )
 
     with pytest.raises(ValueError, match="duplicate embedding index"):
-        await duplicate.embed_texts(["first", "second"])
+        await duplicate.embed_documents(["first", "second"])
     with pytest.raises(ValueError, match="missing embedding index"):
-        await missing.embed_texts(["first", "second"])
+        await missing.embed_documents(["first", "second"])
 
 
 async def test_remote_ocr_client_posts_verbose_request_and_maps_blocks(tmp_path: Path) -> None:
