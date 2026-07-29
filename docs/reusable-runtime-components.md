@@ -54,11 +54,22 @@ Testing fakes share the same one-shot `fail_next()` helper; callers may pass eit
 
 - `aha_common_utils.llm.provider_registry.LLMProviderConfig` describes the generic provider name, endpoint, credential, model, and timeout.
 - `register_llm_provider()`, `available_llm_providers()`, and `create_llm_provider()` provide a typed wrapper around `ProviderRegistry` for `LLMProviderPort`.
-- `OpenAICompatibleLLMProvider` adapts OpenAI-compatible `/chat/completions` APIs and parses the returned message content as a JSON object.
-- `OpenAICompatibleEmbeddingProvider` adapts OpenAI-compatible `/embeddings` APIs, preserves caller input order using response indices, and rejects duplicate or missing response indices.
+- `LLMProviderPort` exposes four generic async methods, all business-independent:
+  - `chat(messages, temperature, max_tokens) -> str` — raw assistant content string.
+  - `complete_json(messages, schema, temperature, max_tokens) -> JsonObject` — JSON-parsed response, with optional schema-backed structured output.
+  - `stream_text(messages, temperature, max_tokens) -> AsyncIterator[str]` — text chunk stream.
+  - `stream_events(messages, temperature, max_tokens) -> AsyncIterator[dict[str, object]]` — normalized LangChain event stream.
+- `OpenAICompatibleLLMProvider` is backed by LangChain `ChatOpenAI`:
+  - `chat()` / `complete_json()` invoke the bound chat model via `ainvoke()`.
+  - `complete_json(schema=...)` uses `with_structured_output(schema)` for schema-constrained responses.
+  - `stream_text()` uses `astream()`; `stream_events()` uses `astream_events(version="v2")`.
+  - `temperature` and `max_tokens` are bound per-call through `runnable.bind()`, never placed in `RunnableConfig`.
+  - Constructor accepts `base_url`, `api_key`, `model`, `request_timeout_seconds`; a test double can be injected via `chat_model`.
+- `OpenAICompatibleEmbeddingProvider` is backed by LangChain `OpenAIEmbeddings.aembed_documents()`, preserves caller input order, and returns `[]` for empty input.
+- Custom OpenTelemetry spans (`llm.chat`, `llm.complete_json`, `llm.stream_text`, `llm.stream_events`, `embedding.embed_texts`) record exceptions and non-secret metadata only — never `api_key` or message content.
 - `llm.json_helpers` contains reusable LLM response helpers for extracting text content, parsing fenced JSON objects, coercing Pydantic/dataclass/dict responses, and reading request ids from provider exceptions.
 
-The LLM layer is intentionally limited to transport, provider construction, and JSON parsing. Project-specific prompts, response schemas, retry policy, budgets, and domain mapping belong in the consuming service.
+The LLM layer is intentionally limited to transport, provider construction, JSON parsing, and generic streaming. Project-specific prompts, response schemas, retry policy, budgets, LangGraph agents, and domain mapping belong in the consuming service. The adapters do not require LangSmith or `LANGCHAIN_TRACING_V2`.
 
 ## OCR Providers
 
