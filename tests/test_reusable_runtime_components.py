@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 from aha_common_utils.adapters.local_file_storage import LocalFileStorageAdapter
 from aha_common_utils.ports.file_scan import FileScanPort, ScanResult
@@ -555,6 +555,35 @@ async def test_llm_provider_registry_registers_and_creates_provider() -> None:
         ) -> dict[str, object]:
             return {"model": self.model, "messages": len(messages)}
 
+        async def chat(
+            self,
+            *,
+            messages: list[LLMMessage],
+            temperature: float = 0.0,
+            max_tokens: int | None = None,
+        ) -> str:
+            return "dummy"
+
+        async def stream_text(
+            self,
+            *,
+            messages: list[LLMMessage],
+            temperature: float = 0.0,
+            max_tokens: int | None = None,
+        ) -> AsyncIterator[str]:
+            yield "dummy"
+            raise StopAsyncIteration
+
+        async def stream_events(
+            self,
+            *,
+            messages: list[LLMMessage],
+            temperature: float = 0.0,
+            max_tokens: int | None = None,
+        ) -> AsyncIterator[dict[str, object]]:
+            yield {"event": "dummy"}
+            raise StopAsyncIteration
+
         async def close(self) -> None:
             return None
 
@@ -652,42 +681,262 @@ def test_typed_provider_registry_helpers_create_and_list_instances() -> None:
         create_provider_instance("missing-provider", BaseProvider)
 
 
+class _FakeChatModel:
+    """Minimal LangChain-compatible fake for testing OpenAICompatibleLLMProvider."""
+
+    def __init__(self, response_content: str = "{\"answer\": 42}") -> None:
+        self.response_content = response_content
+        self.ainvoke_calls: list[object] = []
+        self.ainvoke_configs: list[object] = []
+        self.astream_chunks: list[object] = []
+        self.astream_configs: list[object] = []
+        self.astream_events_chunks: list[dict[str, object]] = []
+        self.astream_events_configs: list[object] = []
+        self.astream_events_versions: list[str] = []
+        self.bind_kwargs: list[dict[str, object]] = []
+        self._structured_schema: object = None
+        self._structured_runnable: _FakeStructuredRunnable | None = None
+
+    async def ainvoke(self, messages: object, config: object = None) -> object:
+        self.ainvoke_calls.append(messages)
+        self.ainvoke_configs.append(config)
+
+        class _FakeMessage:
+            content: str
+
+        msg = _FakeMessage()
+        msg.content = self.response_content
+        return msg
+
+    async def astream(self, messages: object, config: object = None):
+        self.astream_configs.append(config)
+        for chunk in self.astream_chunks:
+            yield chunk
+
+    async def astream_events(self, messages: object, version: str = "v2", config: object = None):
+        self.astream_events_versions.append(version)
+        self.astream_events_configs.append(config)
+        for event in self.astream_events_chunks:
+            yield event
+
+    def bind(self, **kwargs: object) -> _FakeChatModel:
+        self.bind_kwargs.append(kwargs)
+        return self
+
+    def with_structured_output(self, schema: object) -> object:
+        self._structured_schema = schema
+        self._structured_runnable = _FakeStructuredRunnable(self.response_content, schema)
+        return self._structured_runnable
+
+
+class _FakeStructuredRunnable:
+    def __init__(self, response_content: str, schema: object) -> None:
+        self.response_content = response_content
+        self.schema = schema
+        self.ainvoke_configs: list[object] = []
+        self.bind_kwargs: list[dict[str, object]] = []
+
+    async def ainvoke(self, messages: object, config: object = None) -> object:  # noqa: ARG002
+        self.ainvoke_configs.append(config)
+        import json
+
+        if hasattr(self.schema, "model_validate"):
+            model_validate = self.schema.model_validate
+            return model_validate(json.loads(self.response_content))
+        from aha_common_utils.llm.json_helpers import coerce_json_object
+
+        return coerce_json_object(json.loads(self.response_content))
+
+    def bind(self, **kwargs: object) -> _FakeStructuredRunnable:
+        self.bind_kwargs.append(kwargs)
+        return self
+
+
 async def test_openai_compatible_llm_provider_parses_json_response() -> None:
     from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
 
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": {
-                            "content": "```json\n{\"answer\": 42}\n```",
-                        },
-                    }
-                ]
-            },
-        )
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    chat_model = _FakeChatModel(response_content="{\"answer\": 42}")
     provider = OpenAICompatibleLLMProvider(
         base_url="https://llm.example.test/v1",
         api_key="secret-token",
         model="json-model",
-        http_client=client,
+        chat_model=chat_model,
     )
 
-    result = await provider.complete_json(messages=[LLMMessage(role="user", content="Return JSON")], max_tokens=128)
+    result = await provider.complete_json(
+        messages=[LLMMessage(role="user", content="Return JSON")],
+        temperature=0.25,
+        max_tokens=128,
+    )
     await provider.close()
-    await client.aclose()
 
     assert result == {"answer": 42}
-    assert requests[0].url == "https://llm.example.test/v1/chat/completions"
-    assert requests[0].headers["authorization"] == "Bearer secret-token"
-    assert requests[0].read()
+    assert len(chat_model.ainvoke_calls) == 1
+    assert chat_model.bind_kwargs == [{"temperature": 0.25, "max_tokens": 128}]
+    assert chat_model.ainvoke_configs == [None]
+
+
+async def test_openai_compatible_llm_provider_fenced_json_response() -> None:
+    from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
+
+    chat_model = _FakeChatModel(response_content="```json\n{\"answer\": 42}\n```")
+    provider = OpenAICompatibleLLMProvider(
+        base_url="https://llm.example.test/v1",
+        api_key="secret-token",
+        model="json-model",
+        chat_model=chat_model,
+    )
+
+    result = await provider.complete_json(
+        messages=[LLMMessage(role="user", content="Return JSON")],
+    )
+    assert result == {"answer": 42}
+
+
+async def test_openai_compatible_llm_provider_structured_output() -> None:
+    import json
+
+    from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
+
+    chat_model = _FakeChatModel(response_content=json.dumps({"name": "Alice", "score": 95}))
+    provider = OpenAICompatibleLLMProvider(
+        base_url="https://llm.example.test/v1",
+        api_key="secret-token",
+        model="json-model",
+        chat_model=chat_model,
+    )
+
+    result = await provider.complete_json(
+        messages=[LLMMessage(role="user", content="Extract")],
+        schema=type("Person", (), {"__name__": "Person", "model_json_schema": classmethod(lambda cls: {  # type: ignore[arg-type]
+            "type": "object", "properties": {"name": {"type": "string"}, "score": {"type": "integer"}}
+        })}),
+        temperature=0.4,
+        max_tokens=64,
+    )
+    assert result == {"name": "Alice", "score": 95}
+    assert chat_model._structured_runnable is not None
+    assert chat_model._structured_runnable.bind_kwargs == [{"temperature": 0.4, "max_tokens": 64}]
+    assert chat_model._structured_runnable.ainvoke_configs == [None]
+
+
+async def test_openai_compatible_llm_provider_stream_text() -> None:
+    from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
+
+    chat_model = _FakeChatModel()
+    chat_model.astream_chunks = [
+        type("Chunk", (), {"content": "Hello"})(),
+        type("Chunk", (), {"content": " World"})(),
+    ]
+    provider = OpenAICompatibleLLMProvider(
+        base_url="https://llm.example.test/v1",
+        api_key="secret-token",
+        model="json-model",
+        chat_model=chat_model,
+    )
+
+    chunks: list[str] = []
+    async for chunk in provider.stream_text(
+        messages=[LLMMessage(role="user", content="Hi")],
+        temperature=0.6,
+        max_tokens=32,
+    ):
+        chunks.append(chunk)
+
+    assert chunks == ["Hello", " World"]
+    assert chat_model.bind_kwargs == [{"temperature": 0.6, "max_tokens": 32}]
+    assert chat_model.astream_configs == [None]
+
+
+async def test_openai_compatible_llm_provider_stream_events() -> None:
+    from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
+
+    chat_model = _FakeChatModel()
+    chat_model.astream_events_chunks = [
+        {"event": "on_chat_model_start", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {}},
+        {"event": "on_chat_model_stream", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {"chunk": "Hi"}},
+    ]
+    provider = OpenAICompatibleLLMProvider(
+        base_url="https://llm.example.test/v1",
+        api_key="secret-token",
+        model="json-model",
+        chat_model=chat_model,
+    )
+
+    events: list[dict[str, object]] = []
+    async for event in provider.stream_events(
+        messages=[LLMMessage(role="user", content="Hi")],
+        temperature=0.8,
+        max_tokens=16,
+    ):
+        events.append(event)
+
+    assert len(events) == 2
+    assert events[0]["event"] == "on_chat_model_start"
+    assert events[0]["run_id"] == "r1"
+    assert chat_model.bind_kwargs == [{"temperature": 0.8, "max_tokens": 16}]
+    assert chat_model.astream_events_versions == ["v2"]
+    assert chat_model.astream_events_configs == [None]
+
+
+async def test_openai_compatible_llm_provider_chat_returns_raw_content() -> None:
+    from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
+
+    chat_model = _FakeChatModel(response_content="hello world")
+    provider = OpenAICompatibleLLMProvider(
+        base_url="https://llm.example.test/v1",
+        api_key="secret-token",
+        model="json-model",
+        chat_model=chat_model,
+    )
+
+    result = await provider.chat(
+        messages=[LLMMessage(role="user", content="Say hello")],
+        temperature=0.3,
+        max_tokens=64,
+    )
+
+    assert result == "hello world"
+    assert chat_model.bind_kwargs == [{"temperature": 0.3, "max_tokens": 64}]
+
+
+async def test_fake_llm_provider_chat_returns_configured_response() -> None:
+    from aha_common_utils.testing.fakes.llm_provider import FakeLLMProvider
+
+    provider = FakeLLMProvider(raw_responses=["raw-1"])
+
+    assert await provider.chat(messages=[LLMMessage(role="user", content="Say hello")]) == "raw-1"
+
+
+async def test_fake_llm_provider_stream_text_yields_configured_chunks() -> None:
+    from aha_common_utils.testing.fakes.llm_provider import FakeLLMProvider
+
+    provider = FakeLLMProvider(responses=[{"ok": True}])
+    provider.set_text_chunks(["chunk-a", "chunk-b"])
+
+    chunks: list[str] = []
+    async for chunk in provider.stream_text(messages=[LLMMessage(role="user", content="Hi")]):
+        chunks.append(chunk)
+
+    assert chunks == ["chunk-a", "chunk-b"]
+    assert len(provider.stream_text_calls) == 1
+
+
+async def test_fake_llm_provider_stream_events_yields_configured_events() -> None:
+    from aha_common_utils.testing.fakes.llm_provider import FakeLLMProvider
+
+    provider = FakeLLMProvider()
+    provider.set_event_chunks([
+        {"event": "on_chat_model_stream", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {}},
+        {"event": "on_chat_model_end", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {}},
+    ])
+
+    events: list[dict[str, object]] = []
+    async for event in provider.stream_events(messages=[LLMMessage(role="user", content="Hi")]):
+        events.append(event)
+
+    assert len(events) == 2
+    assert events[0]["event"] == "on_chat_model_stream"
 
 
 def test_llm_json_helpers_parse_fenced_content_and_coerce_objects() -> None:
@@ -766,81 +1015,67 @@ async def test_storage_helpers_sanitize_and_enforce_scan_results() -> None:
         )
 
 
-async def test_openai_compatible_embedding_provider_preserves_response_index_order() -> None:
+class _FakeLangChainEmbeddings:
+    """Minimal LangChain-compatible fake for testing OpenAICompatibleEmbeddingProvider."""
+
+    def __init__(self, vectors: list[list[float]]) -> None:
+        self.vectors = vectors
+        self.aembed_documents_calls: list[list[str]] = []
+        self.closed = False
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.aembed_documents_calls.append(texts)
+        return self.vectors
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def test_openai_compatible_embedding_provider_preserves_input_order() -> None:
     from aha_common_utils.adapters.openai_compatible_embedding import OpenAICompatibleEmbeddingProvider
 
-    class FakeEmbeddingData:
-        def __init__(self, index: int, embedding: list[float]) -> None:
-            self.index = index
-            self.embedding = embedding
+    embedding_model = _FakeLangChainEmbeddings(vectors=[[1.0, 2.0], [3.0, 4.0]])
+    provider = OpenAICompatibleEmbeddingProvider(
+        base_url="https://emb.example",
+        api_key="secret",
+        model="emb",
+        embedding_model=embedding_model,
+    )
 
-    class FakeEmbeddingResponse:
-        def __init__(self, data: list[FakeEmbeddingData]) -> None:
-            self.data = data
-
-    class FakeEmbeddings:
-        async def create(self, **kwargs: object) -> FakeEmbeddingResponse:
-            return FakeEmbeddingResponse([
-                FakeEmbeddingData(index=1, embedding=[2.0]),
-                FakeEmbeddingData(index=0, embedding=[1.0]),
-            ])
-
-    class FakeClient:
-        def __init__(self) -> None:
-            self.embeddings = FakeEmbeddings()
-            self.closed = False
-
-        async def close(self) -> None:
-            self.closed = True
-
-    client = FakeClient()
-    provider = OpenAICompatibleEmbeddingProvider(base_url="https://emb.example", api_key="secret", model="emb", client=client)
-
-    assert await provider.embed_documents(["first", "second"]) == [[1.0], [2.0]]
+    result = await provider.embed_texts(["first", "second"])
     await provider.close()
-    assert client.closed is True
+
+    assert result == [[1.0, 2.0], [3.0, 4.0]]
+    assert embedding_model.closed is True
 
 
-async def test_openai_compatible_embedding_provider_rejects_duplicate_or_missing_indices() -> None:
+async def test_openai_compatible_embedding_provider_empty_input() -> None:
     from aha_common_utils.adapters.openai_compatible_embedding import OpenAICompatibleEmbeddingProvider
 
-    class FakeEmbeddingData:
-        def __init__(self, index: int, embedding: list[float]) -> None:
-            self.index = index
-            self.embedding = embedding
-
-    class FakeEmbeddingResponse:
-        def __init__(self, data: list[FakeEmbeddingData]) -> None:
-            self.data = data
-
-    class FakeEmbeddings:
-        def __init__(self, data: list[FakeEmbeddingData]) -> None:
-            self.data = data
-
-        async def create(self, **kwargs: object) -> FakeEmbeddingResponse:
-            return FakeEmbeddingResponse(self.data)
-
-    class FakeClient:
-        def __init__(self, data: list[FakeEmbeddingData]) -> None:
-            self.embeddings = FakeEmbeddings(data)
-
-    duplicate = OpenAICompatibleEmbeddingProvider(
+    provider = OpenAICompatibleEmbeddingProvider(
         base_url="https://emb.example",
         api_key="secret",
         model="emb",
-        client=FakeClient([FakeEmbeddingData(0, [1.0]), FakeEmbeddingData(0, [2.0])]),
+        embedding_model=_FakeLangChainEmbeddings(vectors=[]),
     )
-    missing = OpenAICompatibleEmbeddingProvider(
+
+    assert await provider.embed_texts([]) == []
+    assert await provider.embed([]) == []
+
+
+async def test_openai_compatible_embedding_provider_embed_legacy() -> None:
+    from aha_common_utils.adapters.openai_compatible_embedding import OpenAICompatibleEmbeddingProvider
+
+    embedding_model = _FakeLangChainEmbeddings(vectors=[[0.1, 0.2]])
+    provider = OpenAICompatibleEmbeddingProvider(
         base_url="https://emb.example",
         api_key="secret",
         model="emb",
-        client=FakeClient([FakeEmbeddingData(0, [1.0])]),
+        embedding_model=embedding_model,
     )
 
-    with pytest.raises(ValueError, match="duplicate embedding index"):
-        await duplicate.embed_documents(["first", "second"])
-    with pytest.raises(ValueError, match="missing embedding index"):
-        await missing.embed_documents(["first", "second"])
+    result = await provider.embed(["legacy-text"])
+    assert result == [[0.1, 0.2]]
 
 
 async def test_remote_ocr_client_posts_verbose_request_and_maps_blocks(tmp_path: Path) -> None:

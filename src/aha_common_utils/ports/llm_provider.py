@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any
 
 # The canonical rich EmbeddingProviderPort lives in ``embedding_provider``;
@@ -22,6 +23,36 @@ class LLMProviderPort(ABC):
         max_tokens: int | None = None,
     ) -> JsonObject:
         """Return a JSON object for supplied chat messages."""
+
+    @abstractmethod
+    async def chat(
+        self,
+        *,
+        messages: list[LLMMessage],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Return the raw assistant content string for supplied chat messages."""
+
+    @abstractmethod
+    def stream_text(
+        self,
+        *,
+        messages: list[LLMMessage],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield text chunks for supplied chat messages."""
+
+    @abstractmethod
+    def stream_events(
+        self,
+        *,
+        messages: list[LLMMessage],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Yield normalized event dictionaries for supplied chat messages."""
 
     @abstractmethod
     async def close(self) -> None:

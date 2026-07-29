@@ -1,17 +1,32 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
-from aha_common_utils.ports.llm_provider import EmbeddingProviderPort, LLMProviderPort
+from aha_common_utils.ports.embedding_provider import EmbeddingProviderPort
+from aha_common_utils.ports.llm_provider import LLMProviderPort
 from aha_common_utils.ports.types import EmbeddingVector, JsonObject, LLMMessage
 from aha_common_utils.testing.fakes._failure import FailureMixin
 
 
 class FakeLLMProvider(FailureMixin, LLMProviderPort):
-    def __init__(self, responses: list[JsonObject] | None = None) -> None:
+    def __init__(self, responses: list[JsonObject] | None = None, raw_responses: list[str] | None = None) -> None:
         super().__init__()
         self.responses: list[JsonObject] = list(responses or [{"status": "ok"}])
+        self.raw_responses = list(raw_responses or [])
         self.requests: list[list[LLMMessage]] = []
+        self._text_chunks: list[str] = []
+        self._event_chunks: list[list[dict[str, object]]] = []
+        self.stream_text_calls: list[list[LLMMessage]] = []
+        self.stream_events_calls: list[list[LLMMessage]] = []
+
+    def set_text_chunks(self, chunks: list[str]) -> None:
+        """Configure chunks yielded by stream_text()."""
+        self._text_chunks = list(chunks)
+
+    def set_event_chunks(self, chunks: list[dict[str, object]]) -> None:
+        """Configure events yielded by stream_events()."""
+        self._event_chunks = [list(chunks)]
 
     async def complete_json(
         self,
@@ -26,6 +41,44 @@ class FakeLLMProvider(FailureMixin, LLMProviderPort):
         if not self.responses:
             return {"status": "ok"}
         return self.responses.pop(0)
+
+    async def chat(
+        self,
+        *,
+        messages: list[LLMMessage],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> str:
+        self._raise_if_failed()
+        self.requests.append(messages)
+        if not self.raw_responses:
+            return "ok"
+        return self.raw_responses.pop(0)
+
+    async def stream_text(
+        self,
+        *,
+        messages: list[LLMMessage],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[str]:
+        self._raise_if_failed()
+        self.stream_text_calls.append(messages)
+        for chunk in self._text_chunks:
+            yield chunk
+
+    async def stream_events(
+        self,
+        *,
+        messages: list[LLMMessage],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
+        self._raise_if_failed()
+        self.stream_events_calls.append(messages)
+        for chunk in self._event_chunks:
+            for event in chunk:
+                yield event
 
     async def close(self) -> None:
         return None
