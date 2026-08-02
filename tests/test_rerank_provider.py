@@ -91,6 +91,65 @@ def test_llama_cpp_provider_requires_model_path() -> None:
         LlamaCppRerankProvider(model_path="")
 
 
+def test_llama_cpp_rerank_scores_and_sorts_descending() -> None:
+    provider = LlamaCppRerankProvider(model_path="/app/.models/rerank.gguf")
+    provider._model = _FakeRerankModel([0.1, 0.9, 0.5])
+
+    scores = asyncio.run(provider.rerank(query="q", documents=["a", "b", "c"]))
+
+    assert scores == [RerankScore(index=1, score=0.9), RerankScore(index=2, score=0.5), RerankScore(index=0, score=0.1)]
+
+
+def test_llama_cpp_rerank_respects_top_k() -> None:
+    provider = LlamaCppRerankProvider(model_path="/app/.models/rerank.gguf")
+    provider._model = _FakeRerankModel([0.1, 0.9, 0.5])
+
+    scores = asyncio.run(provider.rerank(query="q", documents=["a", "b", "c"], top_k=2))
+
+    assert scores == [RerankScore(index=1, score=0.9), RerankScore(index=2, score=0.5)]
+
+
+def test_llama_cpp_rerank_pairs_query_with_each_document() -> None:
+    provider = LlamaCppRerankProvider(model_path="/app/.models/rerank.gguf", pair_separator="\n")
+    provider._model = _RecordingRerankModel()
+
+    asyncio.run(provider.rerank(query="query text", documents=["doc a", "doc b"]))
+
+    assert provider._model.inputs == ["query text\ndoc a", "query text\ndoc b"]
+
+
+def test_llama_cpp_rerank_empty_documents_returns_empty() -> None:
+    provider = LlamaCppRerankProvider(model_path="/app/.models/rerank.gguf")
+    provider._model = _FakeRerankModel([])
+
+    scores = asyncio.run(provider.rerank(query="q", documents=[]))
+
+    assert scores == []
+
+
+class _FakeRerankModel:
+    def __init__(self, per_doc_scores: list[float]) -> None:
+        self.per_doc_scores = per_doc_scores
+
+    def embed(self, inputs: list[str]) -> list[list[float]]:
+        return [[score] for score in self.per_doc_scores]
+
+    def close(self) -> None:
+        pass
+
+
+class _RecordingRerankModel:
+    def __init__(self) -> None:
+        self.inputs: list[str] = []
+
+    def embed(self, inputs: list[str]) -> list[list[float]]:
+        self.inputs = list(inputs)
+        return [[0.5] for _ in inputs]
+
+    def close(self) -> None:
+        pass
+
+
 def test_create_rerank_provider_builds_remote_adapter() -> None:
     provider = create_rerank_provider(
         RerankProviderConfig(
