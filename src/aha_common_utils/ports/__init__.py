@@ -24,6 +24,7 @@ from aha_common_utils.ports.provider_capability import (
     ExecutionMode,
     ProviderCapability,
 )
+from aha_common_utils.ports.rerank_provider import RerankProviderPort, RerankScore
 from aha_common_utils.ports.task_queue import GenericTaskConfig, TaskContext, TaskEnvelope, TaskQueuePort
 from aha_common_utils.ports.types import (
     EmbeddingVector,
@@ -64,6 +65,8 @@ __all__ = [
     "OcrPageResult",
     "OcrProviderPort",
     "ProviderCapability",
+    "RerankProviderPort",
+    "RerankScore",
     "ScanResult",
     "TaskContext",
     "TaskEnvelope",
