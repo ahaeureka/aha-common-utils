@@ -12,6 +12,13 @@ from aha_common_utils.ports.graph_errors import (
     GraphUnavailableError,
 )
 from aha_common_utils.ports.graph_store import GraphStorePort
+from aha_common_utils.ports.http_fetch import (
+    AntiCrawlSignal,
+    HttpFetchError,
+    HttpFetchPort,
+    HttpFetchRequest,
+    HttpFetchResponse,
+)
 from aha_common_utils.ports.llm_provider import LLMProviderPort
 from aha_common_utils.ports.ocr_provider import OcrLayoutBlock, OcrPageResult, OcrProviderPort
 from aha_common_utils.ports.provider_capability import (
@@ -24,6 +31,7 @@ from aha_common_utils.ports.provider_capability import (
     ExecutionMode,
     ProviderCapability,
 )
+from aha_common_utils.ports.rerank_provider import RerankProviderPort, RerankScore
 from aha_common_utils.ports.task_queue import GenericTaskConfig, TaskContext, TaskEnvelope, TaskQueuePort
 from aha_common_utils.ports.types import (
     EmbeddingVector,
@@ -57,6 +65,11 @@ __all__ = [
     "GraphStorePort",
     "GraphTraversal",
     "GraphUnavailableError",
+    "HttpFetchError",
+    "HttpFetchPort",
+    "HttpFetchRequest",
+    "HttpFetchResponse",
+    "AntiCrawlSignal",
     "JsonObject",
     "LLMMessage",
     "LLMProviderPort",
@@ -64,6 +77,8 @@ __all__ = [
     "OcrPageResult",
     "OcrProviderPort",
     "ProviderCapability",
+    "RerankProviderPort",
+    "RerankScore",
     "ScanResult",
     "TaskContext",
     "TaskEnvelope",
