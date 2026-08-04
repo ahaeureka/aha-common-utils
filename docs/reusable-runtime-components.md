@@ -81,6 +81,17 @@ The LLM layer is intentionally limited to transport, provider construction, JSON
 
 OCR common-utils owns only provider transport and canonical response normalization. PDF rendering, document parsing, page concurrency, textbook semantics, and domain-specific OCR policies belong in the consuming project.
 
+## HTTP Fetch and Anti-Detection Layer
+
+- `aha_common_utils.ports.http_fetch` defines `HttpFetchPort` plus the frozen value objects `HttpFetchRequest` / `HttpFetchResponse` and the `AntiCrawlSignal` enum. All crawl/probe/download traffic goes through this port; domain code must not construct httpx/curl clients directly.
+- `http_fetch.anti_crawl_detector` provides `SiteProfile` and `AntiCrawlDetector`: status-code branches (403/429/503), empty/minimal body checks, site-specific regex patterns, generic signals (captcha / JS challenge / blocked keywords), and header challenges (cf-ray, server: cloudflare, x-challenge). The library ships only the generic signal set; domain profiles (FRED/OpenBB etc.) are injected via `register_site()`.
+- `http_fetch.anti_detection` provides the `AntiDetectionStrategy` ABC and `AntiDetectionManager` (default `anti-detection` provider). The default policy starts with `CurlCffiStrategy` (TLS fingerprint) and escalates on failure through `CloakBrowserStrategy → CamoufoxStrategy`; blocked requests without a proxy are retried once through `ProxyManager`. Optional dependencies (`curl-cffi`, `cloakbrowser`, `camoufox`) are lazily imported and missing ones are skipped by the manager instead of failing startup.
+- `http_fetch.auto_planning.AutoPlanningEngine` adaptively rate-limits per domain (429/503 exponential backoff, 200 slow recovery); `http_fetch.proxy.ProxyManager` rotates egress proxies by success rate and health-checks them.
+- `http_fetch.provider_registry` exposes `HttpFetchProviderConfig` and the typed helpers `register_http_fetch_provider()`, `available_http_fetch_providers()`, `create_http_fetch_provider()`. `anti-detection` is the default; single-strategy providers such as `httpx` / `curl-cffi` are also registered. Unknown providers raise `UnknownHttpFetchProviderError` (fail-fast, no Fake fallback). The default chain is `curl-cffi → cloakbrowser → camoufox`; plain `httpx` is intentionally not in the default chain (its TLS fingerprint is weaker than curl-cffi) but remains selectable.
+- `http_fetch.proxy_server.HttpProxyServer` is an anti-detection-aware HTTP forward proxy: plain HTTP requests and `CONNECT` tunnels are forwarded upstream through an injected `HttpFetchPort` (default `AntiDetectionManager`). With a `CertificateAuthority` (see `http_fetch.mitm_ca.MitmCertificateAuthority`), `CONNECT` is MITM-intercepted so HTTPS is also dispatched through the strategy chain; without one it falls back to a raw byte tunnel. Hop-by-hop headers are stripped, request bodies are size-capped, and anti-crawl signals are echoed via the `X-Anti-Crawl-Signal` response header.
+- `http_fetch.mitm_ca.MitmCertificateAuthority` persists a self-signed root CA (`ca.key`/`ca.crt`) and signs per-host leaf certificates (default 30 days) for MITM interception.
+- `testing.fakes.http_fetch.FakeHttpFetchProvider` records requests, serves configured responses by URL or FIFO order with status codes / anti-crawl signals, and supports one-shot `fail_next()` and `reset()`.
+
 ## Boundary Rules
 
 - Keep these modules business-independent.
