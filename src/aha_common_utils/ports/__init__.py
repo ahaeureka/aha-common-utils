@@ -1,5 +1,6 @@
 """Business-independent port contracts."""
 
+from aha_common_utils.ports.asr_provider import AsrProviderPort, AsrResult, AsrSegment
 from aha_common_utils.ports.cache_store import CacheStorePort
 from aha_common_utils.ports.embedding_provider import EmbeddingProviderPort
 from aha_common_utils.ports.file_scan import FileScanPort, ScanResult
@@ -40,6 +41,9 @@ __all__ = [
     "BatchItem",
     "BatchItemResult",
     "BatchItemStatus",
+    "AsrProviderPort",
+    "AsrResult",
+    "AsrSegment",
     "BatchRequest",
     "BatchTelemetry",
     "CacheStorePort",
