@@ -12,13 +12,6 @@ from aha_common_utils.ports.graph_errors import (
     GraphUnavailableError,
 )
 from aha_common_utils.ports.graph_store import GraphStorePort
-from aha_common_utils.ports.http_fetch import (
-    AntiCrawlSignal,
-    HttpFetchError,
-    HttpFetchPort,
-    HttpFetchRequest,
-    HttpFetchResponse,
-)
 from aha_common_utils.ports.llm_provider import LLMProviderPort
 from aha_common_utils.ports.ocr_provider import OcrLayoutBlock, OcrPageResult, OcrProviderPort
 from aha_common_utils.ports.provider_capability import (
@@ -65,11 +58,6 @@ __all__ = [
     "GraphStorePort",
     "GraphTraversal",
     "GraphUnavailableError",
-    "HttpFetchError",
-    "HttpFetchPort",
-    "HttpFetchRequest",
-    "HttpFetchResponse",
-    "AntiCrawlSignal",
     "JsonObject",
     "LLMMessage",
     "LLMProviderPort",
