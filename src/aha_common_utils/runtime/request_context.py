@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid as _uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -96,7 +96,7 @@ def reset_request_context(
 
 
 @contextmanager
-def request_context(ctx: RequestContext) -> Iterator[RequestContext]:
+def request_context(ctx: RequestContext) -> Generator[RequestContext, None, None]:
     ctx_token, log_token = set_request_context(ctx)
     try:
         yield ctx
