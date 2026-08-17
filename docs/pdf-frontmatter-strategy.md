@@ -5,6 +5,7 @@
 > 参考实现：`tmp/exam-highlight/.../domains/document/parsing/`（layout/textbook/toc_resolver）
 > 现状宿主：`k2skills-core/domains/datasource/pdf_source.py` + `content/normalizer/books.py`
 > 目标宿主：`aha-common-utils`（公共 PDF 处理能力下沉）
+> 关联文档：`docs/pdf-parsing-foundation.md`（PDF 基础解析与版面分析管线，本设计消费其 L0-L4 输出）
 
 ---
 
