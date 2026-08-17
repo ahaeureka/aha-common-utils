@@ -46,7 +46,7 @@ exam-highlight 参考实现只做三件事：跳过 `cover` 页（`page_role`）
 - 不做业务方言：无 k2skills proto / 表 / DTO 依赖；
 - 不代行业务决策：章节如何映射为 endpoint、检索单元如何切割，由业务端基于输出契约决定；
 - 版面分析只做"标签→块类型 + 层级"结构化，不做像素级 OCR 引擎（引擎走注入的 OcrProviderPort）；
-- 不做 LLM 主决策（LLM 只作为低层证据的输入之一）；
+- 不做 LLM 主决策（LLM 只作为低层证据的输入之一），且 LLM 一律以**依赖注入**接入——复用 `aha_common_utils.llm`（provider_registry）与 `aha_common_utils.ports.llm_provider`（`LLMProviderPort`），`pdf/` 包内绝不直接构造或持有具体 provider；
 - 不承诺跨语种零配置（语言敏感规则可配置）；
 - 文档本阶段只含设计，不含实现代码。
 
@@ -159,7 +159,8 @@ PDF 文件 ── L0 文本层提取 ──► PdfPage{text, page_label}        
 
 - L0/L1 全落空且处于边界模糊区的少量页面（如"序"页片段），带版面特征 + 文本给 LLM 打标；
 - 最终边界由确定性规则锁死；LLM 输出只是证据加权的一项输入；
-- 防止 LLM 把"绪论"当"前言"砍掉。
+- 防止 LLM 把"绪论"当"前言"砍掉；
+- **接入方式**：LLM 经 `LLMProviderPort` 依赖注入（`complete_json` 打标），`PdfPipelineConfig.llm` 注入；测试用 `FakeLLMProvider`（`aha_common_utils.testing.fakes.llm_provider`），生产用 `create_llm_provider(LLMProviderConfig)` 由调用方构造——`pdf/` 包内不依赖任何具体 provider 实现。
 
 ### 思路 D：统计异常检测（无词汇表兜底）
 
@@ -288,6 +289,7 @@ aha_common_utils/pdf/
 - `pdf/` 只依赖 stdlib + pypdf + `aha_common_utils.ports`（ocr_provider/types）；
 - 不 import 任何业务包；`PdfTextExtractor`/`OcrProviderPort`/页面渲染器均为可注入协议（测试注入 fake，生产注入真实实现）；
 - `structurer.py` 的章节聚合对 k2skills 现在的 `_SectionAccumulator` 逻辑是**收编而非改写**——同样的 heading 驱动逻辑，产出公共 `PdfSection`；
+- **LLM 依赖注入**：`heuristics.py`/`boundary.py` 若需 LLM 证据，仅经 `LLMProviderPort` 接口调用（复用 `aha_common_utils.ports.llm_provider` + `aha_common_utils.llm.provider_registry`），由 `PdfPipelineConfig.llm` 注入，`pdf/` 内不实例化任何具体 provider；
 - OCR 布局标签的 front matter 扩展映射放 `pdf/` 侧，`ports/ocr_provider.py` 的 `OcrLayoutBlock` 保持原样（label 是自由字符串，无需改动端口）。
 
 ### 8.1 主入口 API 草案
@@ -303,6 +305,7 @@ class PdfPipelineConfig:
     zone_action: str = "separate"       # drop | separate | keep
     page_text_extractor: PdfTextExtractor | None = None
     ocr: OcrProviderPort | None = None
+    llm: LLMProviderPort | None = None      # 依赖注入（L3 启发式/思路 C 打标用；复用 ports.llm_provider）
     page_renderer: PageRenderer | None = None
 
 class PdfPipeline:
@@ -393,6 +396,7 @@ def apply_zones(
 - **D4**：既有 k2skills 启发式与章节聚合全部**收编**到公共管线，迁移期输出对拍保证零行为变化（§9/§11）。
 - **D5**：front matter 主方案 = L0 权威信号 + 软分区（思路 A）+ fail-open 边界（§4/§5/§7）。
 - **D6**：LLM 只作证据输入，不做边界主决策（§5 思路 C）。
+- **D8**：LLM 依赖注入——仅经 `LLMProviderPort` 接口（复用 `ports/llm_provider.py` + `llm/provider_registry.py`），由 `PdfPipelineConfig.llm` 注入；`pdf/` 包内不构造/持有任何具体 provider，测试用 `FakeLLMProvider`（§5/§8）。
 - **D7**：默认 `zone_action="separate"`（软分区），`drop` 仅审计场景显式开启（§6/§8）。
 - **待决（评审征询）**：
   - PageLabels 罗马页码与 outline 首章页码冲突时的优先级；
