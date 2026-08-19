@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from dataclasses import asdict
@@ -7,7 +8,7 @@ from pathlib import Path
 
 from aha_common_utils.ports.file_scan import FileScanPort
 from aha_common_utils.ports.file_storage import FileStoragePort
-from aha_common_utils.ports.file_storage_errors import StorageNotFoundError, StorageSecurityError
+from aha_common_utils.ports.file_storage_errors import StorageIntegrityError, StorageNotFoundError, StorageSecurityError
 from aha_common_utils.ports.types import JsonObject, StoredFileInfo
 
 
@@ -42,6 +43,7 @@ class LocalFileStorageAdapter(FileStoragePort):
             content_type=content_type,
             size_bytes=len(content),
             metadata={"folder": folder, "business_id": business_id, **dict(metadata or {})},
+            content_sha256=hashlib.sha256(content).hexdigest(),
         )
         (directory / "metadata.json").write_text(json.dumps(asdict(info)), encoding="utf-8")
         return file_id
@@ -51,6 +53,7 @@ class LocalFileStorageAdapter(FileStoragePort):
         if metadata_path is None:
             raise StorageNotFoundError(file_id)
         raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+        raw.setdefault("content_sha256", "")
         return StoredFileInfo(**raw)
 
     async def download_file_to_path(
@@ -64,7 +67,15 @@ class LocalFileStorageAdapter(FileStoragePort):
         if metadata_path is None:
             raise StorageNotFoundError(file_id)
         content_path = metadata_path.parent / "content.bin"
-        Path(output_path).write_bytes(content_path.read_bytes())
+        data = content_path.read_bytes()
+        if verify_integrity:
+            info_raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+            expected = str(info_raw.get("content_sha256") or "")
+            if expected:
+                actual = hashlib.sha256(data).hexdigest()
+                if actual != expected:
+                    raise StorageIntegrityError()
+        Path(output_path).write_bytes(data)
         return output_path
 
     async def delete_file(self, file_id: str) -> None:

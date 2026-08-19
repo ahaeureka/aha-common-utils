@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from aha_common_utils.ports.file_scan import FileScanPort
 from aha_common_utils.ports.file_storage import FileStoragePort
-from aha_common_utils.ports.file_storage_errors import StorageNotFoundError, StorageSecurityError
+from aha_common_utils.ports.file_storage_errors import StorageIntegrityError, StorageNotFoundError, StorageSecurityError
 from aha_common_utils.ports.types import JsonObject, StoredFileInfo
 from aha_common_utils.scanners.always_clean import AlwaysCleanScanner
 from aha_common_utils.testing.fakes._failure import FailureMixin
@@ -44,6 +45,7 @@ class FakeFileStorage(FailureMixin, FileStoragePort):
             content_type=content_type,
             size_bytes=len(content),
             metadata={"folder": folder, "business_id": business_id, **dict(metadata or {})},
+            content_sha256=hashlib.sha256(content).hexdigest(),
         )
         self.files[file_id] = (info, content)
         return file_id
@@ -64,6 +66,11 @@ class FakeFileStorage(FailureMixin, FileStoragePort):
         self._raise_if_failed()
         if file_id not in self.files:
             raise StorageNotFoundError(file_id)
+        info, data = self.files[file_id]
+        if verify_integrity and info.content_sha256:
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != info.content_sha256:
+                raise StorageIntegrityError()
         Path(output_path).write_bytes(self.files[file_id][1])
         return output_path
 

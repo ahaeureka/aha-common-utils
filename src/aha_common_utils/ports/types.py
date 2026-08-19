@@ -17,6 +17,7 @@ class StoredFileInfo:
     content_type: str
     size_bytes: int
     metadata: JsonObject = field(default_factory=dict)
+    content_sha256: str = ""
 
 
 @dataclass(frozen=True, slots=True)
