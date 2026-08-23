@@ -647,16 +647,10 @@ class ConfigStore:
             load_env_file(env_specific, override=True)
             logger.debug("[ConfigStore] loaded env file: %s", env_specific.name)
 
-        # Restore pre-existing process keys that were NOT overridden by
-        # .env.local / .env.<ENV>.local.  Keys that changed (overridden)
-        # keep their new value from the override-sensitive dotenv files.
-        overrides: set[str] = set()
-        for key, prev_value in pre_existing.items():
-            current = os.environ.get(key)
-            if current is not None and current != prev_value:
-                overrides.add(key)
-        restored = {k: v for k, v in pre_existing.items() if k not in overrides}
-        os.environ.update(restored)
+        # Process variables are highest priority.  Dotenv files may override one
+        # another while loading, but must never replace a value inherited from the
+        # invoking process (including a deliberately empty string).
+        os.environ.update(pre_existing)
 
     # ── Internal: env overrides ───────────────────────────────────────────
 

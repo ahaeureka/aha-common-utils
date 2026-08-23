@@ -7,6 +7,7 @@ Validates the required contracts:
 4. Pre-existing process key beats all dotenv files
 5. Pre-existing empty-string process key is also restored
 6. Unrelated process key is left unchanged
+7. Process values remain highest priority even when .env.local is present
 """
 
 from pathlib import Path
@@ -141,3 +142,16 @@ def test_unrelated_process_key_preserved(tmp_path: Path, monkeypatch) -> None:
     import os
 
     assert os.environ.get("UNRELATED_VAR") == "keep-me"
+
+
+def test_process_env_beats_local_dotenv(tmp_path: Path, monkeypatch) -> None:
+    """A local dotenv value cannot override a value supplied by the invoking process."""
+    _write_env_placeholder_config(tmp_path)
+    (tmp_path / ".env.local").write_text("EXAMPLE_VALUE=local-dotenv\n", encoding="utf-8")
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("EXAMPLE_VALUE", "process-wins")
+
+    cfg = ConfigStore().load(ExampleConfig, base_dir=tmp_path)
+
+    assert _example_value(cfg) == "process-wins"

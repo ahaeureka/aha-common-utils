@@ -85,6 +85,10 @@ class Router:
             deprecated=deprecated,
         )
 
+    @property
+    def typer_instance(self) -> typer.Typer:
+        """Underlying typer application (for typer.testing.CliRunner / introspection)."""
+        return self._typer
     def command(
         self,
         name: str | None = None,
@@ -195,6 +199,11 @@ class CliApp:
             no_args_is_help=no_args_is_help,
             add_completion=add_completion,
         )
+
+    @property
+    def typer_instance(self) -> typer.Typer:
+        """Underlying typer application (for typer.testing.CliRunner / introspection)."""
+        return self._typer
 
     def command(
         self,

@@ -37,6 +37,8 @@ dependencies = [
     "langchain>=0.3.0",
     "langchain-openai>=0.3.0",
     "llama-cpp-python>=0.3.33",
+    "magika>=1.0.3",
+    "python-magic>=0.4.27",
 ]
 
 [build-system]
