@@ -32,6 +32,8 @@ class RequestContext:
 
     request_id: str
     user_id: str = ""
+    tenant_id: str = ""
+    workspace_id: str = ""
     task_id: str | None = None
     started_at: float = field(default_factory=time.time)
     session_id: str | None = None

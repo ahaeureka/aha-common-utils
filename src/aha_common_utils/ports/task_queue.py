@@ -20,6 +20,9 @@ class TaskContext:
     traceparent: str = ""
     tracestate: str = ""
     user_id: str | None = None
+    #: scope 供 future worker consume 循环注入 per-task RequestContext（D5 就绪态）
+    tenant_id: str = ""
+    workspace_id: str = ""
 
     def to_dict(self) -> JsonObject:
         payload: JsonObject = {
@@ -30,6 +33,10 @@ class TaskContext:
         }
         if self.user_id is not None:
             payload["user_id"] = self.user_id
+        if self.tenant_id:
+            payload["tenant_id"] = self.tenant_id
+        if self.workspace_id:
+            payload["workspace_id"] = self.workspace_id
         return payload
 
     @classmethod
@@ -44,6 +51,8 @@ class TaskContext:
             traceparent=str(data.get("traceparent", "")),
             tracestate=str(data.get("tracestate", "")),
             user_id=str(data["user_id"]) if data.get("user_id") else None,
+            tenant_id=str(data.get("tenant_id", "")),
+            workspace_id=str(data.get("workspace_id", "")),
         )
 
 
