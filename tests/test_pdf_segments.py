@@ -11,6 +11,7 @@ from aha_common_utils.pdf.segments import (
     detect_table,
     heading_or_none,
     pdf_heading_level,
+    merge_hyphenated_line_breaks,
     split_paragraphs,
 )
 
@@ -69,3 +70,33 @@ def test_heading_or_none_table_not_heading() -> None:
 def test_heading_or_none_heading_passthrough() -> None:
     assert heading_or_none("# 第一章") == 1
     assert heading_or_none("第一章 绪论") == 1
+
+
+def test_merge_hyphenated_line_breaks_merges_word_splits() -> None:
+    """PDF 断字 `soft-\nware` → `software`（词中断行合并）。"""
+    assert merge_hyphenated_line_breaks("soft-\nware") == "software"
+    assert merge_hyphenated_line_breaks("archi-\ntecture") == "architecture"
+    assert merge_hyphenated_line_breaks("man-\nage") == "manage"
+    assert merge_hyphenated_line_breaks("higher-\nquality") == "higher-quality"
+    # 词后空格 + 连字符 + 换行（PDF 常见变体）
+    assert merge_hyphenated_line_breaks("con -\ncepts") == "concepts"
+    assert merge_hyphenated_line_breaks("ap -\nplication") == "application"
+
+
+def test_merge_hyphenated_line_breaks_keeps_compound() -> None:
+    """真复合词（第二片段是独立词）保留连字符。"""
+    assert merge_hyphenated_line_breaks("step-\nby-step") == "step-by-step"
+    assert merge_hyphenated_line_breaks("non-\ntrivial") == "non-trivial"
+    assert merge_hyphenated_line_breaks("more-\nover") == "more-over"
+
+
+def test_merge_hyphenated_line_breaks_deterministic() -> None:
+    """同一输入恒等输出（确定性契约）。"""
+    text = "software engineering is a soft-\nware discipline\nstep-\nby-step"
+    assert merge_hyphenated_line_breaks(text) == merge_hyphenated_line_breaks(text)
+
+
+def test_split_paragraphs_merges_hyphenation() -> None:
+    """split_paragraphs 默认合并断行（消费方两处自动生效）。"""
+    md = "soft-\nware engineering\n\nstep-\nby-step guide"
+    assert split_paragraphs(md) == ["software engineering", "step-by-step guide"]

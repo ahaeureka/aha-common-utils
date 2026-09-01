@@ -39,6 +39,7 @@ from aha_common_utils.pdf.policy import (
 from aha_common_utils.pdf.segments import (
     detect_table,
     heading_or_none,
+    merge_hyphenated_line_breaks,
     pdf_heading_level,
     split_paragraphs,
 )
@@ -90,6 +91,7 @@ __all__ = [
     "FrontMatterPolicy",
     # segments
     "split_paragraphs",
+    "merge_hyphenated_line_breaks",
     "pdf_heading_level",
     "detect_table",
     "heading_or_none",
