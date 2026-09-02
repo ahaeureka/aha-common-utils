@@ -10,8 +10,8 @@ from __future__ import annotations
 from aha_common_utils.pdf.segments import (
     detect_table,
     heading_or_none,
-    pdf_heading_level,
     merge_hyphenated_line_breaks,
+    pdf_heading_level,
     split_paragraphs,
 )
 
@@ -100,3 +100,24 @@ def test_split_paragraphs_merges_hyphenation() -> None:
     """split_paragraphs 默认合并断行（消费方两处自动生效）。"""
     md = "soft-\nware engineering\n\nstep-\nby-step guide"
     assert split_paragraphs(md) == ["software engineering", "step-by-step guide"]
+
+
+def test_split_paragraphs_long_line_no_hang() -> None:
+    """超长单行（1MB+ 表格行）线性处理不卡死（re 灾难性回溯回归防护）。"""
+    import time
+
+    row = "| " + "x" * 1_100_000 + " |"
+    md = "# 超限章\n\n" + row
+    t0 = time.monotonic()
+    paras = split_paragraphs(md)
+    elapsed = time.monotonic() - t0
+    assert paras and len(paras) >= 1
+    # 原实现（整段 regex sub）同输入 >100s；线性实现应 <1s
+    assert elapsed < 1.0
+
+def test_merge_hyphenated_line_breaks_chained() -> None:
+    """链式断字（合并后行尾又断字）全部合并。"""
+    text = "soft-\nware 工程 与 step-\nby-step 流程，con -\ncepts 说明"
+    assert merge_hyphenated_line_breaks(text) == (
+        "software 工程 与 step-by-step 流程，concepts 说明"
+    )
