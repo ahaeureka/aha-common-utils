@@ -8,7 +8,13 @@ from typing import Any, Protocol, cast
 import httpx
 
 from aha_common_utils.json_values import flatten_numeric_list
-from aha_common_utils.ports.ocr_provider import OcrLayoutBlock, OcrPageResult, OcrProviderPort
+from aha_common_utils.ocr.zip_assets import parse_ocr_zip
+from aha_common_utils.ports.ocr_provider import (
+    OcrDocumentResult,
+    OcrLayoutBlock,
+    OcrPageResult,
+    OcrProviderPort,
+)
 from aha_common_utils.ports.types import JsonObject
 
 
@@ -20,6 +26,7 @@ class AsyncPostClient(Protocol):
 class OcrHttpResponse(Protocol):
     status_code: int
     text: str
+    content: bytes
 
     def json(self) -> object:
         """Return the decoded JSON response."""
@@ -90,6 +97,30 @@ class RemoteOcrClient(OcrProviderPort):
             },
         )
 
+
+    async def recognize_document(self, path: Path, *, language: str = "Chinese") -> OcrDocumentResult:
+        """POST /v1/ocr with response_format=zip; parse the binary ZIP safely."""
+        data: dict[str, object] = {"response_format": "zip", "language": language}
+        files: dict[str, Any] = {
+            "file": (path.name, path.read_bytes(), "application/octet-stream"),
+        }
+
+        try:
+            response = await self._post(data=data, files=files)
+        except OcrServiceError:
+            raise
+        except Exception as exc:
+            raise OcrServiceError(f"OCR request failed: {exc}", retryable=True) from exc
+
+        status_code = int(getattr(response, "status_code", 0))
+        if status_code >= 400:
+            detail = getattr(response, "text", "") or "remote OCR error"
+            raise OcrServiceError(f"OCR request failed with HTTP {status_code}: {detail}", retryable=True)
+
+        raw = getattr(response, "content", b"")
+        if not raw:
+            raise OcrServiceError("OCR ZIP response was empty", retryable=True)
+        return parse_ocr_zip(raw)
     async def _post(self, *, data: dict[str, object], files: dict[str, Any]) -> OcrHttpResponse:
         if self._http_client is not None:
             return await self._http_client.post(self._api_url, data=data, files=files)

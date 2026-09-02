@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aha_common_utils.ports.ocr_provider import OcrPageResult, OcrProviderPort
+from aha_common_utils.ports.ocr_provider import OcrDocumentResult, OcrPageResult, OcrProviderPort
 from aha_common_utils.ports.types import JsonObject
 from aha_common_utils.testing.fakes._failure import FailureMixin
 
@@ -10,11 +10,19 @@ from aha_common_utils.testing.fakes._failure import FailureMixin
 class FakeOcrProvider(FailureMixin, OcrProviderPort):
     """Deterministic OCR provider fake for tests."""
 
-    def __init__(self, results: list[OcrPageResult] | None = None, *, model: str = "fake-ocr") -> None:
+    def __init__(
+        self,
+        results: list[OcrPageResult] | None = None,
+        *,
+        model: str = "fake-ocr",
+        document_results: list[OcrDocumentResult] | None = None,
+    ) -> None:
         super().__init__()
         self._results = list(results or [])
+        self._document_results = list(document_results or [])
         self.model = model
         self.calls: list[tuple[Path, str]] = []
+        self.document_calls: list[tuple[Path, str]] = []
 
     async def recognize_file(self, path: Path, *, language: str = "Chinese") -> OcrPageResult:
         self._raise_if_failed()
@@ -30,12 +38,24 @@ class FakeOcrProvider(FailureMixin, OcrProviderPort):
             metadata={"filename": path.name},
         )
 
+
+    async def recognize_document(self, path: Path, *, language: str = "Chinese") -> OcrDocumentResult:
+        self._raise_if_failed()
+        self.document_calls.append((path, language))
+        if self._document_results:
+            return self._document_results.pop(0)
+        return OcrDocumentResult(document_markdown=f"# {path.stem}\n\n{path.stem}")
+
+    def add_document_result(self, result: OcrDocumentResult) -> None:
+        self._document_results.append(result)
     def add_result(self, result: OcrPageResult) -> None:
         self._results.append(result)
 
     def reset(self) -> None:
         self._results.clear()
+        self._document_results.clear()
         self.calls.clear()
+        self.document_calls.clear()
         self._next_failure = None
 
     async def close(self) -> None:

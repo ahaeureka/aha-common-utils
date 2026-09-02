@@ -12,7 +12,7 @@ from aha_common_utils.adapters.local_file_storage import LocalFileStorageAdapter
 from aha_common_utils.ports.file_scan import FileScanPort, ScanResult
 from aha_common_utils.ports.file_storage_errors import StorageNotFoundError, StorageSecurityError
 from aha_common_utils.ports.llm_provider import EmbeddingProviderPort, LLMProviderPort
-from aha_common_utils.ports.ocr_provider import OcrPageResult, OcrProviderPort
+from aha_common_utils.ports.ocr_provider import OcrDocumentResult, OcrPageResult, OcrProviderPort
 from aha_common_utils.ports.task_queue import GenericTaskConfig, InvalidEnvelopeError, TaskContext, TaskEnvelope
 from aha_common_utils.ports.types import LLMMessage
 from aha_common_utils.runtime.lifecycle import LifecycleRegistry, close_once
@@ -1143,6 +1143,10 @@ async def test_ocr_provider_registry_registers_and_creates_provider() -> None:
 
         async def recognize_file(self, path: Path, *, language: str = "Chinese") -> OcrPageResult:
             return OcrPageResult(model=self.model, text=path.name, markdown=language)
+
+        async def recognize_document(self, path: Path, *, language: str = "Chinese") -> OcrDocumentResult:
+            return OcrDocumentResult(document_markdown=f"# {path.name}")
+
 
     register_ocr_provider("unit-dummy-ocr", DummyOcrProvider)
 
