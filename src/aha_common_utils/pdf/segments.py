@@ -111,6 +111,150 @@ def detect_table(para: str) -> bool:
     return any(_TABLE_ROW_RE.match(line) for line in para.splitlines())
 
 
+# 句末终止符：ASCII（`.`/`!`/`?`）与 CJK/省略号（`…`/`。`/`！`/`？`）
+_ASCII_TERMINATORS = ".!?"
+_CJK_TERMINATORS = "…。！？"
+# 可跟在终止符后的收尾字符（引号/括号/书名号）
+_TRAILING_CHARS = "\"'”’)]}」』】》〉"
+_TERMINATORS = _ASCII_TERMINATORS + _CJK_TERMINATORS
+# 点式缩写（e.g. / i.e. / U.S. / al.）：末点不构成句末
+_DOTTED_ABBREV_RE = re.compile(r"(?:[A-Za-z]\.)+[A-Za-z]?\.$")
+
+
+def _is_dotted_abbreviation(text: str, dot_index: int) -> bool:
+    """``text[dot_index]`` 是否为点式缩写的末点（如 ``e.g.`` / ``U.S.``）。
+
+    只回看当前空白分隔 token；token 形如若干「单字母 + 点」再以点收尾即判为缩写。
+    """
+    start = dot_index
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    token = text[start : dot_index + 1]
+    return len(token) <= 8 and bool(_DOTTED_ABBREV_RE.fullmatch(token))
+
+
+def _emit_collapsed_ws(text: str, start: int, out: list[str], offs: list[int]) -> None:
+    """逐字符发出，把空白串折叠为单个空格（偏移记在该串首字符）。"""
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in " \t\r\f\v":
+            j = i
+            while j < n and text[j] in " \t\r\f\v":
+                j += 1
+            out.append(" ")
+            offs.append(start + i)
+            i = j
+            continue
+        out.append(ch)
+        offs.append(start + i)
+        i += 1
+
+
+def _normalize_with_offsets(text: str) -> tuple[str, list[int]]:
+    """把 PDF 页文本规范化为「逻辑行」文本 + 每个字符的原文偏移。
+
+    视觉硬换行不是句子边界：行尾断字按 ``merge_hyphenated_line_breaks`` 的同一判据连接
+    （第二片段为独立复合词时保留连字符），其余换行折叠为单个空格；空白串折叠为一个
+    空格。返回的偏移表使区间可回溯到原文本，供 quote_span / locator 使用。
+    """
+    lines: list[tuple[str, int]] = []
+    pos = 0
+    for line in text.split("\n"):
+        lines.append((line, pos))
+        pos += len(line) + 1
+    out: list[str] = []
+    offs: list[int] = []
+    join_next = False
+    for index, (line, lstart) in enumerate(lines):
+        if join_next:
+            lead = 0
+            while lead < len(line) and line[lead] in " \t":
+                lead += 1
+            line = line[lead:]
+            lstart += lead
+            join_next = False
+        m_end = _line_end_word_hyphen(line)
+        if m_end is not None and index + 1 < len(lines):
+            next_line, next_start = lines[index + 1]
+            m_next = _line_start_word(next_line)
+            if m_next is not None:
+                second, _ = m_next
+                body = line[: len(line.rstrip(" \t"))]
+                keep = second in _KEEP_HYPHEN_SECOND
+                cut = len(body) if keep else len(body) - 1
+                _emit_collapsed_ws(line[:cut], lstart, out, offs)
+                # 行尾空白与换行丢弃；下一行的前导空白在 join 分支跳过
+                join_next = True
+                continue
+        _emit_collapsed_ws(line, lstart, out, offs)
+        if index + 1 < len(lines) and out and out[-1] != " ":
+            out.append(" ")
+            offs.append(lstart + len(line))
+    return "".join(out), offs
+
+
+def fold_visual_line_breaks(text: str) -> str:
+    """把视觉硬换行折叠为空格（并连接行尾断字），得到单行逻辑文本。
+
+    PDF 文本层的 ``\\n`` 是**排版换行**而非语义边界；保留它会让下游把一行当成一句话。
+    段落切分（按空行）必须在折叠**之前**完成，否则段落边界一起丢失。
+    """
+    normalized, _ = _normalize_with_offsets(text)
+    return normalized.strip()
+
+
+def reconstruct_sentences(text: str) -> list[tuple[str, int, int]]:
+    """把 PDF 页文本重建为句子 + 原文区间 ``(sentence, start, end)``。
+
+    先按逻辑行规范化（断字连接、视觉换行折叠），再以句末终止符切分。两类误切已排除：
+
+    - **小数点/缩写点**：ASCII 终止符后必须是空白或文末，故 ``3.5`` 不切；点式缩写
+      （``e.g.`` / ``i.e.`` / ``U.S.``）的末点不视为句末（``_is_dotted_abbreviation``）。
+      代价：``et al.`` 这类单字母点式缩写同样不切，句子会并到下一个终止符——
+      并句仍产出完整语句，切错则产出碎片，故取并句。
+    - **CJK 无词间空白**：``。！？…`` 之后允许直接接下一句，不要求空白。
+
+    区间为**原文本**字符偏移，故调用方可用它直接构造 quote_span / locator。
+    """
+    normalized, offs = _normalize_with_offsets(text)
+    if not normalized.strip() or not offs:
+        return []
+    out: list[tuple[str, int, int]] = []
+    n = len(normalized)
+    start = 0
+    i = 0
+    while i < n:
+        ch = normalized[i]
+        if ch in _TERMINATORS:
+            is_ascii = ch in _ASCII_TERMINATORS
+            if not (is_ascii and _is_dotted_abbreviation(normalized, i)):
+                j = i + 1
+                while j < n and normalized[j] in _TRAILING_CHARS:
+                    j += 1
+                # ASCII 终止符需空白/文末作为词边界；CJK 终止符自身即边界
+                if not is_ascii or j >= n or normalized[j] == " ":
+                    out.append(_sentence_slice(normalized, offs, start, j))
+                    start = j
+                    i = j
+                    continue
+        i += 1
+    if start < n:
+        out.append(_sentence_slice(normalized, offs, start, n))
+    return [s for s in out if s[0]]
+
+
+def _sentence_slice(normalized: str, offs: list[int], lo: int, hi: int) -> tuple[str, int, int]:
+    """切出 [lo, hi) 并去掉首尾空白，返回 (文本, 原文起, 原文止)。"""
+    text = normalized[lo:hi]
+    lead = len(text) - len(text.lstrip())
+    trimmed = text.strip()
+    if not trimmed:
+        return ("", 0, 0)
+    first = lo + lead
+    last = first + len(trimmed) - 1
+    return (trimmed, offs[first], offs[last] + 1)
 def heading_or_none(para: str) -> int | None:
     """标题启发式：表格段不当标题（避免 tab 行误判章节）。"""
     if detect_table(para):

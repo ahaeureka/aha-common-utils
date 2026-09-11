@@ -38,9 +38,11 @@ from aha_common_utils.pdf.policy import (
 )
 from aha_common_utils.pdf.segments import (
     detect_table,
+    fold_visual_line_breaks,
     heading_or_none,
     merge_hyphenated_line_breaks,
     pdf_heading_level,
+    reconstruct_sentences,
     split_paragraphs,
 )
 from aha_common_utils.pdf.structural import (
@@ -91,8 +93,10 @@ __all__ = [
     "FrontMatterPolicy",
     # segments
     "split_paragraphs",
+    "fold_visual_line_breaks",
     "merge_hyphenated_line_breaks",
     "pdf_heading_level",
+    "reconstruct_sentences",
     "detect_table",
     "heading_or_none",
     # assets
