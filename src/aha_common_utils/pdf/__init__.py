@@ -40,6 +40,7 @@ from aha_common_utils.pdf.segments import (
     detect_table,
     fold_visual_line_breaks,
     heading_or_none,
+    is_citation_sentence,
     merge_hyphenated_line_breaks,
     pdf_heading_level,
     reconstruct_sentences,
@@ -94,6 +95,7 @@ __all__ = [
     # segments
     "split_paragraphs",
     "fold_visual_line_breaks",
+    "is_citation_sentence",
     "merge_hyphenated_line_breaks",
     "pdf_heading_level",
     "reconstruct_sentences",

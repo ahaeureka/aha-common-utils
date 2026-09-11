@@ -260,3 +260,30 @@ def heading_or_none(para: str) -> int | None:
     if detect_table(para):
         return None
     return pdf_heading_level(para)
+
+# ── 文献引用句判据（通用学术惯例，非素材词表） ────────────────────────────────
+# 判据：句末为 4 位年份，**且**具备至少一项文献形态——
+# 引号标题 / 页码区间 / 卷期 / 引用缩写（et al./pp./vol.）/ DOI。
+# 单说「We chose Spring in 2013.」不构成引用（只有年份）。
+_ISO_YEAR_RE = re.compile(r"\b(?:18|19|20)\d{2}\b")
+_QUOTED_TITLE_RE = re.compile(r"[\u201c\"][^\u201d\"]{8,}[\u201d\"]")
+_VOLUME_ISSUE_RE = re.compile(r"\b\d+\s*\(\s*\d+\s*\)")
+_CITATION_ABBREV: tuple[str, ...] = ("et al.", "pp.", "vol.", "eds.", "doi:", "http://", "https://")
+
+
+def is_citation_sentence(text: str) -> bool:
+    """是否为文献引用句（参考文献条目/文内引文），因而不构成方法证据。
+
+    真实取证（2026-09-10 审计后续）：``Kazman, “A Principled Way of Using
+    Frameworks in Architectural Design”, IEEE Software, 46–53, March/April 2013.``
+    曾作为唯一证据支撑起一个三步"方法"——它其实是一本书的延伸阅读条目。
+    """
+    stripped = text.strip()
+    if not stripped or not _ISO_YEAR_RE.search(stripped):
+        return False
+    # 只要年份不算引用（"We chose Spring in 2013." 是正文）：需另有文献形态。
+    # 页码区间（46–53）不单独作判据——"see pages 46–53" 是正文。
+    if _QUOTED_TITLE_RE.search(stripped) or _VOLUME_ISSUE_RE.search(stripped):
+        return True
+    lowered = stripped.lower()
+    return any(marker in lowered for marker in _CITATION_ABBREV)
