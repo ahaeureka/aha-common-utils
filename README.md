@@ -127,6 +127,10 @@ store.save({"debug": True}, "config.toml", path="app")
 
 > 环境变量支持 `SECTION_FIELD` 命名模式自动路由到嵌套模型。例如 `LLM_API_KEY` 自动映射到 `llm.api_key`，`EMBEDDING_OPENAI_BASE_URL` 自动映射到 `embedding.openai.base_url`。无需手动配置 `env_prefix`。
 
+> **前缀约定**：`ConfigStore` 按 `SECTION_FIELD` 使用**裸名**环境变量（并兼容剥除历史前缀 `W5_FLOW_`）。
+> 因此它不适用于「项目必须有自己前缀」的场景（例如容器/CI 里多项目共用同一环境时要求 `MYAPP_DATABASE_URL`）。
+> 这类项目需要自持一层加载器（读取前缀后映射到字段），或在共享库支持显式前缀后再迁移。
+
 ---
 
 ## 支持的配置文件格式
@@ -479,6 +483,11 @@ base_url = "${env:LLM_BASE_URL:-https://api.openai.com}"
 ## 从 SecureBaseSettings 迁移
 
 `SecureBaseSettings`（基于 pydantic-settings）已被 `BaseParameters`（纯 pydantic BaseModel）+ `ConfigStore` 替代。
+
+> ⚠️ **不迁移的后果是「静默失效」**：`SecureBaseSettings` 现在是 `BaseParameters` 的别名，**不读取环境变量与 dotenv**。
+> 继续写 `class AppSettings(SecureBaseSettings)` + `model_config = SettingsConfigDict(env_prefix="MYAPP_")` 时，
+> Python 不会报任何错，但 `MYAPP_*` 环境变量、`config.toml`、`.env.local` **全部被忽略**，`AppSettings()` 永远返回代码默认值。
+> 为避免再次静默，访问 `SecureBaseSettings` 现在会发出 `DeprecationWarning`（下一主版本将直接删除该名字）。
 
 ### 迁移步骤
 
