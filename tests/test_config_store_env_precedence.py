@@ -460,3 +460,23 @@ def test_unknown_env_key_is_reported_not_guessed(tmp_path: Path, monkeypatch) ->
     assert store.unknown_env_keys == ("QUNAPAI_TOTALLY_MADE_UP",)
     assert not hasattr(cast(Any, cfg), "totally")
     assert _database_url(cfg) == "from-file"
+
+
+def test_prefixed_env_beats_dotenv_bare_name(tmp_path: Path, monkeypatch) -> None:
+    """A prefixed process-env value must beat a dotenv-provided bare name.
+
+    Both end up in ``os.environ``, so without an explicit priority ordering the
+    winner was whichever was inserted last — ``.env.local`` could silently
+    override ``QUNAPAI_DATABASE_URL``. The dotenv exemption from the bare-name
+    rule must not become a priority promotion.
+    """
+    _write_nested_config(tmp_path)
+    (tmp_path / ".env.local").write_text("DATABASE_URL=from-dotenv\n", encoding="utf-8")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("QUNAPAI_DATABASE_URL", "from-prefixed-env")
+
+    cfg = ConfigStore().load(
+        NestedConfig, base_dir=tmp_path, reject_bare_env=True, env_prefix="QUNAPAI_"
+    )
+
+    assert _database_url(cfg) == "from-prefixed-env"

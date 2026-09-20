@@ -518,30 +518,41 @@ class ConfigStore:
         self._raw_data = dict(merged)
 
         # 5. Load .env + .env.local + .env.<ENV>.local into os.environ
-        self._dotenv_keys = frozenset(self._load_env_files(base_dir, app_env))
+        #
+        # The dotenv chain is loaded *into the process environment* so that
+        # ``${env:NAME}`` placeholders and the override step below can see it.
+        # That mutation is undone before returning: a config loader must not
+        # leave dotenv values (frequently secrets) in the process environment,
+        # and leaving them behind makes two loads with different ``base_dir``
+        # interfere with each other.
+        pre_load_env = dict(os.environ)
+        try:
+            self._dotenv_keys = frozenset(self._load_env_files(base_dir, app_env))
 
-        # 6. Walk merged dict and resolve ${env:VAR:-default} patterns
-        unresolved: set[str] = set()
-        merged = _interpolate_env_vars(
-            merged,
-            unresolved=unresolved,
-            blank_unresolved=blank_unresolved_placeholders,
-        )
-        if not isinstance(merged, dict):
-            merged = {}
-        self._unresolved_placeholders = tuple(sorted(unresolved))
+            # 6. Walk merged dict and resolve ${env:VAR:-default} patterns
+            unresolved: set[str] = set()
+            merged = _interpolate_env_vars(
+                merged,
+                unresolved=unresolved,
+                blank_unresolved=blank_unresolved_placeholders,
+            )
+            if not isinstance(merged, dict):
+                merged = {}
+            self._unresolved_placeholders = tuple(sorted(unresolved))
 
-        # 7. Apply process env overrides for top-level keys with type coercion
-        self._unknown_env_keys = self._apply_env_overrides(
-            merged,
-            reject_bare_env=reject_bare_env,
-            env_prefix=env_prefix,
-            config_class=config_class,
-            dotenv_keys=self._dotenv_keys,
-        )
+            # 7. Apply process env overrides for top-level keys with type coercion
+            self._unknown_env_keys = self._apply_env_overrides(
+                merged,
+                reject_bare_env=reject_bare_env,
+                env_prefix=env_prefix,
+                config_class=config_class,
+                dotenv_keys=self._dotenv_keys,
+            )
 
-        # 8. Construct model via from_dict (handles its own env-var interpolation)
-        instance = config_class.from_dict(merged, ignore_extra_fields=True)
+            # 8. Construct model via from_dict (handles its own env-var interpolation)
+            instance = config_class.from_dict(merged, ignore_extra_fields=True)
+        finally:
+            _restore_process_env(pre_load_env)
 
         # 9. Reports are always populated; the warnings are opt-in (silent by default)
         self._unknown_keys = _collect_unknown_keys(self._raw_data, config_class)
@@ -872,6 +883,14 @@ class ConfigStore:
         index = _env_name_index(config_class) if config_class is not None else {}
         unknown: list[str] = []
 
+        # Two priority classes, applied in order: a prefixed process-env value
+        # must always beat a dotenv-provided bare name (the documented
+        # precedence). Both live in ``os.environ``, so without an explicit
+        # ordering the winner would be whichever happened to be inserted last —
+        # a bare name loaded from ``.env.local`` could silently override
+        # ``QUNAPAI_X``.
+        candidates: list[tuple[int, str, str, str]] = []
+
         for env_key, env_val in os.environ.items():
             # Strip legacy pydantic-settings prefix
             key = env_key
@@ -893,6 +912,9 @@ class ConfigStore:
             if not key or (key == env_key and key.startswith("W5_FLOW_")):
                 continue
 
+            candidates.append((1 if stripped is not None else 0, env_key, key, env_val))
+
+        for _priority, env_key, key, env_val in sorted(candidates, key=lambda item: item[0]):
             path = index.get(key.upper())
             if path is None:
                 unknown.append(env_key)
@@ -1050,6 +1072,24 @@ def _warn_about_reports(
             "[ConfigStore] 以下环境变量未设置且无默认值，占位符按字面量保留：{}（应在 .env.local 或进程环境注入）",
             ", ".join(unresolved),
         )
+
+
+# ── Helper: process-environment hygiene ────────────────────────────────
+
+
+def _restore_process_env(snapshot: dict[str, str]) -> None:
+    """Restore ``os.environ`` to *snapshot*, dropping keys added since.
+
+    ``_load_env_files`` only restores the keys it *changed*; keys the dotenv
+    chain introduced stay behind. Dropping them here keeps
+    :meth:`ConfigStore.load` free of a global side effect, while still letting
+    placeholder resolution and the override step see dotenv values during the
+    load. Without it a load leaks dotenv values into every later load — two
+    loads with different ``base_dir`` would silently share them.
+    """
+    for key in [name for name in os.environ if name not in snapshot]:
+        del os.environ[key]
+    os.environ.update(snapshot)
 
 
 __all__ = [
