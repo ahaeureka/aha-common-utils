@@ -21,7 +21,7 @@ import json as _json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from .config_base import BaseParameters
 from .config_file_parser import load_env_file
@@ -81,7 +81,12 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
 # ── Helper: env-var interpolation ─────────────────────────────────────────
 
 
-def _interpolate_env_vars(data: Any) -> Any:
+def _interpolate_env_vars(
+    data: Any,
+    *,
+    unresolved: set[str] | None = None,
+    blank_unresolved: bool = False,
+) -> Any:
     """Recursively resolve ``${env:VAR:-default}`` patterns in strings.
 
     Handles nested dicts, lists, and tuples. Non-string values are
@@ -89,25 +94,45 @@ def _interpolate_env_vars(data: Any) -> Any:
 
     Args:
         data: Any value that may contain env-var placeholders.
+        unresolved: Optional collector receiving the names of placeholders that
+            had neither an environment value nor a ``:-default``.
+        blank_unresolved: Replace an unresolved placeholder with an empty string
+            instead of leaving the literal ``${env:NAME}``. Both choices make the
+            miss observable (one via the report, one via a visibly wrong value);
+            the default keeps the literal.
 
     Returns:
         Value with all env-var placeholders resolved against ``os.environ``.
     """
     if isinstance(data, str):
-        return _ENV_VAR_PATTERN.sub(_env_replacer, data)
+        return _ENV_VAR_PATTERN.sub(
+            lambda match: _env_replacer(match, unresolved=unresolved, blank_unresolved=blank_unresolved),
+            data,
+        )
     if isinstance(data, dict):
-        return {k: _interpolate_env_vars(v) for k, v in data.items()}
+        return {
+            k: _interpolate_env_vars(v, unresolved=unresolved, blank_unresolved=blank_unresolved)
+            for k, v in data.items()
+        }
     if isinstance(data, (list, tuple)):
-        return type(data)(_interpolate_env_vars(v) for v in data)
+        return type(data)(
+            _interpolate_env_vars(v, unresolved=unresolved, blank_unresolved=blank_unresolved) for v in data
+        )
     return data
 
 
-def _env_replacer(match: re.Match[str]) -> str:
+def _env_replacer(
+    match: re.Match[str],
+    *,
+    unresolved: set[str] | None = None,
+    blank_unresolved: bool = False,
+) -> str:
     """Replacement callback for ``_ENV_VAR_PATTERN.sub()``.
 
     Looks up the captured variable name in ``os.environ``; falls back to
-    the ``:-default`` portion when present. If neither is available, the
-    placeholder is returned unchanged.
+    the ``:-default`` portion when present. If neither is available, the name is
+    recorded in *unresolved* (when a collector was supplied) and the placeholder
+    is returned as-is — or as an empty string when *blank_unresolved* is set.
     """
     var_name = match.group(1)
     default = match.group(2)
@@ -116,40 +141,88 @@ def _env_replacer(match: re.Match[str]) -> str:
         return env_value
     if default is not None:
         return default
-    return match.group(0)
+    if unresolved is not None:
+        unresolved.add(var_name)
+    return "" if blank_unresolved else match.group(0)
 
 
 # ── Helper: type coercion for env overrides ───────────────────────────────
 
 
-def _coerce_value(env_value: str, existing_value: Any) -> Any:
+#: Truthy/falsy spellings accepted for a ``bool`` target. A superset of what
+#: pydantic accepts, so no value pydantic would take is rejected here.
+_TRUTHY_ENV_VALUES = frozenset({"true", "1", "yes", "on", "t", "y"})
+_FALSY_ENV_VALUES = frozenset({"false", "0", "no", "off", "f", "n"})
+
+
+def _unwrap_optional(annotation: Any) -> Any:
+    """Return the single non-``None`` member of ``X | None`` (unchanged otherwise)."""
+    members = [member for member in get_args(annotation) if member is not type(None)]
+    return members[0] if len(members) == 1 else annotation
+
+
+def _coerce_value(env_value: str, existing_value: Any, *, source: str | None = None) -> Any:
     """Coerce a string environment value to match the type of *existing_value*.
 
     Rules:
-    - If *existing_value* is ``bool``, parse truthy/falsy strings.
-    - If *existing_value* is ``int``, call ``int(env_value)``.
-    - If *existing_value* is ``float``, call ``float(env_value)``.
-    - Otherwise return the string unchanged.
+    - ``bool`` target: parse truthy/falsy spellings. An unparseable value raises
+      ``ValueError`` naming *source*, so a bad value is attributed to the
+      variable that carried it instead of surfacing as an anonymous field error.
+    - ``int`` / ``float`` target: parse, falling back to the raw string when the
+      text is not a plain number — pydantic then reports the offending field.
+    - Otherwise return the string.
+
+    Whitespace is stripped in every case. That is deliberate: incidental padding
+    is a classic footgun (a trailing ``" # comment"`` once leaked into a secret),
+    and no legitimate configuration value depends on leading/trailing spaces.
 
     Args:
         env_value: Raw string from the process environment.
-        existing_value: Current value in the merged config dict.
+        existing_value: Current value in the merged config dict, or the field's
+            declared annotation when the path is known.
+        source: Name of the variable the value came from, used in errors.
 
     Returns:
         Coerced value.
     """
-    if isinstance(existing_value, bool):
-        lower = env_value.lower()
-        if lower in ("true", "1", "yes", "on"):
+    text = env_value.strip()
+    kind = _target_kind(existing_value)
+    if kind is bool:
+        lower = text.lower()
+        if lower in _TRUTHY_ENV_VALUES:
             return True
-        if lower in ("false", "0", "no", "off"):
+        if lower in _FALSY_ENV_VALUES:
             return False
-        return env_value
-    if isinstance(existing_value, int):
-        return int(env_value)
-    if isinstance(existing_value, float):
-        return float(env_value)
-    return env_value
+        raise ValueError(f"{source or '环境变量'} 的取值 {env_value!r} 无法解析为 bool")
+    if kind is int:
+        try:
+            return int(text)
+        except ValueError:
+            return text
+    if kind is float:
+        try:
+            return float(text)
+        except ValueError:
+            return text
+    return text
+
+
+def _target_kind(value: Any) -> type | None:
+    """Which scalar type *value* stands for — either as an annotation or as a value.
+
+    Both forms reach :func:`_coerce_value`: a caller may pass the field's declared
+    annotation (``bool``, the type) or the current value from the merged dict
+    (``True``, an instance). ``isinstance(bool, bool)`` is ``False``, so the two
+    cases must be distinguished explicitly — otherwise a typed override silently
+    falls through and pydantic reports it as an anonymous field error instead.
+    """
+    if value is bool or isinstance(value, bool):
+        return bool
+    if value is int or isinstance(value, int):
+        return int
+    if value is float or isinstance(value, float):
+        return float
+    return None
 
 
 # ============================================================================
@@ -305,6 +378,10 @@ class ConfigStore:
         ``_raw_data`` is ``None`` until a successful ``load()`` call.
         """
         self._raw_data: dict[str, Any] | None = None
+        self._unknown_keys: tuple[str, ...] = ()
+        self._unresolved_placeholders: tuple[str, ...] = ()
+        self._unknown_env_keys: tuple[str, ...] = ()
+        self._dotenv_keys: frozenset[str] = frozenset()
 
     # ── raw_data property ─────────────────────────────────────────────────
 
@@ -316,6 +393,44 @@ class ConfigStore:
         """
         return self._raw_data
 
+    @property
+    def unknown_keys(self) -> tuple[str, ...]:
+        """Dotted paths of file-sourced config keys that match no model field.
+
+        Computed from :attr:`raw_data` — the merged file snapshot taken
+        **before** process-environment overrides. Comparing the final merged
+        dict instead would flag every unrelated environment variable, because
+        :meth:`_apply_env_overrides` auto-creates nested dicts for any
+        ``A_B_C`` key it encounters.
+
+        Empty until a successful :meth:`load`.
+        """
+        return self._unknown_keys
+
+    @property
+    def unresolved_placeholders(self) -> tuple[str, ...]:
+        """Names referenced by ``${env:NAME}`` with no value and no ``:-default``.
+
+        The configured value is left as the literal ``${env:NAME}`` — this
+        report only makes the miss observable; it does not change semantics.
+
+        Empty until a successful :meth:`load`.
+        """
+        return self._unresolved_placeholders
+
+    @property
+    def unknown_env_keys(self) -> tuple[str, ...]:
+        """Process/dotenv keys that matched no field path of the model.
+
+        Names are derived from the model (``SCOPE_KEY``), so a key that matches
+        nothing is either a typo or a name left over from an older schema.
+        Reporting it keeps that visible: the key is skipped rather than being
+        guessed into a nested table nobody reads.
+
+        Empty until a successful :meth:`load`.
+        """
+        return self._unknown_env_keys
+
     # ── load ──────────────────────────────────────────────────────────────
 
     def load(
@@ -324,6 +439,11 @@ class ConfigStore:
         *,
         base_dir: Path | None = None,
         app_env: str | None = None,
+        reject_bare_env: bool = False,
+        env_prefix: str | None = None,
+        blank_unresolved_placeholders: bool = False,
+        warn_unknown_keys: bool = False,
+        warn_unresolved_placeholders: bool = False,
     ) -> BaseParameters:
         """Load, merge, and construct a config model from files and env.
 
@@ -343,6 +463,18 @@ class ConfigStore:
             app_env: Environment identifier (e.g. ``"production"``). When
                 ``None``, reads ``APP_ENV`` from the process environment
                 (defaults to ``"development"``).
+            reject_bare_env: When ``True``, only process-environment keys
+                carrying *env_prefix* are routed into the config. Bare names
+                are ignored — containers are full of unrelated variables whose
+                names can collide with a config section. Defaults to ``False``
+                so existing consumers keep their permissive behaviour.
+            env_prefix: Prefix required when *reject_bare_env* is on
+                (e.g. ``"QUNAPAI_"``). Required in that case: without it no key
+                could ever be accepted, so the combination is rejected.
+            warn_unknown_keys: Emit a warning listing :attr:`unknown_keys`.
+                Defaults to ``False``; the report is populated either way.
+            warn_unresolved_placeholders: Emit a warning listing
+                :attr:`unresolved_placeholders`. Defaults to ``False``.
 
         Returns:
             An instance of *config_class* populated from all sources.
@@ -351,6 +483,11 @@ class ConfigStore:
             base_dir = _find_project_root()
         if app_env is None:
             app_env = os.environ.get("APP_ENV", "development").strip().lower()
+
+        if reject_bare_env and not env_prefix:
+            raise ValueError(
+                "reject_bare_env=True requires env_prefix (otherwise no environment key could ever be accepted)"
+            )
 
         # 1. Discover config files
         yaml_files = self._discover_yaml_files(base_dir, app_env)
@@ -381,18 +518,39 @@ class ConfigStore:
         self._raw_data = dict(merged)
 
         # 5. Load .env + .env.local + .env.<ENV>.local into os.environ
-        self._load_env_files(base_dir, app_env)
+        self._dotenv_keys = frozenset(self._load_env_files(base_dir, app_env))
 
         # 6. Walk merged dict and resolve ${env:VAR:-default} patterns
-        merged = _interpolate_env_vars(merged)
+        unresolved: set[str] = set()
+        merged = _interpolate_env_vars(
+            merged,
+            unresolved=unresolved,
+            blank_unresolved=blank_unresolved_placeholders,
+        )
         if not isinstance(merged, dict):
             merged = {}
+        self._unresolved_placeholders = tuple(sorted(unresolved))
 
         # 7. Apply process env overrides for top-level keys with type coercion
-        self._apply_env_overrides(merged)
+        self._unknown_env_keys = self._apply_env_overrides(
+            merged,
+            reject_bare_env=reject_bare_env,
+            env_prefix=env_prefix,
+            config_class=config_class,
+            dotenv_keys=self._dotenv_keys,
+        )
 
         # 8. Construct model via from_dict (handles its own env-var interpolation)
         instance = config_class.from_dict(merged, ignore_extra_fields=True)
+
+        # 9. Reports are always populated; the warnings are opt-in (silent by default)
+        self._unknown_keys = _collect_unknown_keys(self._raw_data, config_class)
+        _warn_about_reports(
+            unknown_keys=self._unknown_keys,
+            unresolved=self._unresolved_placeholders,
+            warn_unknown_keys=warn_unknown_keys,
+            warn_unresolved_placeholders=warn_unresolved_placeholders,
+        )
 
         return instance
 
@@ -608,7 +766,7 @@ class ConfigStore:
     # ── Internal: env file loading ────────────────────────────────────────
 
     @staticmethod
-    def _load_env_files(base_dir: Path, app_env: str) -> None:
+    def _load_env_files(base_dir: Path, app_env: str) -> set[str]:
         """Load ``.env``, ``.env.local``, and ``.env.<ENV>.local`` into ``os.environ``.
 
         Snapshots the process environment before loading any dotenv files,
@@ -653,7 +811,12 @@ class ConfigStore:
         # environment did not define keep the value produced by the dotenv
         # chain, so `.env.local` can still override `.env`, and
         # `.env.<ENV>.local` can still override `.env.local`.
+        # Record what the dotenv chain contributed *before* restoring the
+        # snapshot: those keys are exempt from the bare-name rule, because the
+        # project controls that chain itself.
+        dotenv_keys = {key for key, value in os.environ.items() if pre_existing.get(key) != value}
         os.environ.update(pre_existing)
+        return dotenv_keys
 
     # ── Internal: env overrides ───────────────────────────────────────────
 
@@ -661,73 +824,232 @@ class ConfigStore:
     _LEGACY_ENV_PREFIXES: tuple[str, ...] = ("W5_FLOW_",)
 
     @staticmethod
-    def _apply_env_overrides(merged: dict[str, Any]) -> None:
+    def _apply_env_overrides(
+        merged: dict[str, Any],
+        *,
+        reject_bare_env: bool = False,
+        env_prefix: str | None = None,
+        config_class: type[BaseParameters] | None = None,
+        dotenv_keys: frozenset[str] = frozenset(),
+    ) -> tuple[str, ...]:
         """Apply process environment variables as overrides.
 
-        Environment variable names are routed to nested config paths using
-        ``SECTION_FIELD`` splitting: each ``_``-separated segment is tried
-        as a dict key walking down from the root of *merged*.  For example,
-        ``DATABASE_URL`` routes to ``merged["database"]["url"]``.
+        A variable name is **derived from the model**, never looked up in a
+        table: every leaf field path becomes ``SCOPE_KEY`` — its segments
+        uppercased and joined with ``_``. So ``database.url`` reads
+        ``DATABASE_URL``, ``llm.api_key`` reads ``LLM_API_KEY``, and
+        ``s3_file_storage.access_key`` reads ``S3_FILE_STORAGE_ACCESS_KEY``.
 
-        Legacy ``W5_FLOW_`` prefix is automatically stripped before matching.
-        Values are type-coerced to match the existing value's type
-        (bool, int, float, or string).
+        Deriving the name is what makes the rule unambiguous. Field names
+        themselves contain underscores, so splitting a name back on ``_``
+        cannot work (``LLM_API_KEY`` would become ``llm.api.key``); building the
+        index from the model inverts the derivation exactly instead.
+
+        A key that matches no field path is **not guessed at**: it is skipped
+        and reported in the return value, so a typo or a stale name stays
+        visible instead of silently creating an unused nested table.
+
+        Values are type-coerced and whitespace-stripped.
+
+        When *reject_bare_env* is set, keys carrying neither *env_prefix* nor a
+        dotenv origin are skipped. That is an opt-in discipline for consumers
+        whose deployments are full of unrelated variables: a bare ``DEBUG`` or
+        ``DATABASE_URL`` coming from an unrelated tool would otherwise silently
+        become configuration. Dotenv keys are exempt because that chain is
+        controlled by the project itself, and prefix matching is
+        case-insensitive because process-env spelling varies in practice.
 
         Args:
             merged: The merged configuration dict (mutated in-place).
+            reject_bare_env: Skip keys with neither the prefix nor a dotenv origin.
+            env_prefix: Required prefix when *reject_bare_env* is on.
+            config_class: Model whose field paths define the accepted names.
+            dotenv_keys: Keys supplied by the dotenv chain (exempt from the prefix rule).
+
+        Returns:
+            Names of the environment keys that matched no field path.
         """
+        index = _env_name_index(config_class) if config_class is not None else {}
+        unknown: list[str] = []
+
         for env_key, env_val in os.environ.items():
             # Strip legacy pydantic-settings prefix
             key = env_key
-            for prefix in ConfigStore._LEGACY_ENV_PREFIXES:
-                if key.startswith(prefix):
-                    key = key[len(prefix) :]
+            for legacy in ConfigStore._LEGACY_ENV_PREFIXES:
+                if key.startswith(legacy):
+                    key = key[len(legacy) :]
                     break
+
+            # Bind the stripped form so the type checker can follow the
+            # ``env_prefix is not None`` narrowing into the slice below.
+            stripped: str | None = None
+            if env_prefix is not None and key.upper().startswith(env_prefix.upper()):
+                stripped = key[len(env_prefix) :]
+            if reject_bare_env and stripped is None and env_key not in dotenv_keys:
+                continue
+            if stripped is not None:
+                key = stripped
 
             if not key or (key == env_key and key.startswith("W5_FLOW_")):
                 continue
 
-            # Try top-level match first
-            if key in merged:
-                merged[key] = _coerce_value(env_val, merged[key])
+            path = index.get(key.upper())
+            if path is None:
+                unknown.append(env_key)
                 continue
 
-            # Try SECTION_FIELD nested routing: split on _ and walk the dict
-            _set_nested_env(merged, key, _coerce_value(env_val, env_val))
+            annotation = _annotation_for_path(config_class, path)
+            target = annotation if annotation is not None else _get_by_path(merged, path)
+            _set_by_path(merged, path, _coerce_value(env_val, target, source=env_key))
+
+        return tuple(sorted(unknown))
 
 
-# ── Helper: SECTION_FIELD nested routing ────────────────────────────────
+# ── Helper: derived environment names ──────────────────────────────────
 
 
-def _set_nested_env(
-    merged: dict[str, Any],
-    key: str,
-    value: Any,
-) -> bool:
-    """Route a flat env key into *merged* using SECTION_FIELD splitting.
+def _env_name_index(model: type[BaseParameters]) -> dict[str, tuple[str, ...]]:
+    """Map every leaf field path of *model* to its derived environment name.
 
-    Splits *key* on ``_`` and walks or creates nested dicts in *merged*.
-    Returns ``True`` if the value was set at a nested path.
-
-    Examples:
-        ``APP_NAME`` → ``merged["app"]["name"]``
-        ``DATABASE_URL`` → ``merged["database"]["url"]``
+    ``("llm", "api_key")`` → ``"LLM_API_KEY"``. Building the index from the
+    model inverts the naming rule exactly, so no hand-written name table can
+    drift out of sync with the schema.
     """
-    parts = key.lower().split("_")
-    if len(parts) < 2:
-        return False
+    index: dict[str, tuple[str, ...]] = {}
 
-    # Walk the merged dict, auto-creating intermediate dicts
-    node: dict[str, Any] = merged
-    for _i, part in enumerate(parts[:-1]):
-        if part not in node or not isinstance(node[part], dict):
-            node[part] = {}
+    def walk(current: type[BaseParameters], prefix: tuple[str, ...]) -> None:
+        for name, field in current.model_fields.items():
+            annotation = _unwrap_optional(field.annotation)
+            path = (*prefix, name)
+            if _is_group(annotation):
+                walk(annotation, path)
+            else:
+                index["_".join(path).upper()] = path
+
+    walk(model, ())
+    return index
+
+
+def _is_group(annotation: Any) -> bool:
+    """Whether *annotation* is a nested ``BaseParameters`` group."""
+    return isinstance(annotation, type) and issubclass(annotation, BaseParameters)
+
+
+def _annotation_for_path(model: type[BaseParameters] | None, path: tuple[str, ...]) -> Any:
+    """Declared annotation for a field *path*, or ``None`` when unresolvable."""
+    current: Any = model
+    for part in path:
+        if not _is_group(current):
+            return None
+        field = current.model_fields.get(part)
+        if field is None:
+            return None
+        current = _unwrap_optional(field.annotation)
+    return current
+
+
+def _get_by_path(merged: dict[str, Any], path: tuple[str, ...]) -> Any:
+    """Current value at *path* inside *merged*, or ``None``."""
+    node: Any = merged
+    for part in path:
+        if not isinstance(node, dict) or part not in node:
+            return None
         node = node[part]
+    return node
 
-    node[parts[-1]] = value
-    return True
+
+def _set_by_path(merged: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
+    """Assign *value* at the nested *path*, creating intermediate tables."""
+    node = merged
+    for part in path[:-1]:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            node[part] = child
+        node = child
+    node[path[-1]] = value
 
     # ── Internal: writing helpers ─────────────────────────────────────────
+
+
+# ── Helper: reports behind the opt-in guards ────────────────────────────
+
+
+def _collect_unknown_keys(
+    raw_data: dict[str, Any] | None,
+    config_class: type[BaseParameters],
+) -> tuple[str, ...]:
+    """Dotted paths in *raw_data* that match no field path of *config_class*.
+
+    *raw_data* is the merged **file** snapshot, taken before process-environment
+    overrides. The final merged dict cannot be used here: the override step
+    auto-creates nested dicts for any ``A_B_C`` environment variable, so every
+    unrelated variable would be reported and drown the signal.
+
+    Recursion follows nested ``BaseParameters`` groups, so ``[database] url`` is
+    checked against the group model rather than against a flattened name.
+    """
+    if not raw_data:
+        return ()
+
+    unknown: list[str] = []
+
+    def walk(node: dict[str, Any], model: type[BaseParameters], prefix: str) -> None:
+        fields = model.model_fields
+        for key, value in node.items():
+            path = f"{prefix}{key}"
+            field = fields.get(key)
+            if field is None:
+                unknown.append(path)
+                continue
+            annotation = field.annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseParameters):
+                if isinstance(value, dict):
+                    walk(value, annotation, f"{path}.")
+                continue
+            if isinstance(value, dict):
+                # A table where a scalar was declared: nothing under it can be
+                # consumed either, so report the leaves.
+                unknown.extend(_leaf_paths(value, f"{path}."))
+
+    walk(raw_data, config_class, "")
+    return tuple(sorted(unknown))
+
+
+def _leaf_paths(node: dict[str, Any], prefix: str) -> list[str]:
+    """Dotted paths of every leaf value under *node*."""
+    paths: list[str] = []
+    for key, value in node.items():
+        path = f"{prefix}{key}"
+        if isinstance(value, dict):
+            paths.extend(_leaf_paths(value, path + "."))
+        else:
+            paths.append(path)
+    return paths
+
+
+def _warn_about_reports(
+    *,
+    unknown_keys: tuple[str, ...],
+    unresolved: tuple[str, ...],
+    warn_unknown_keys: bool,
+    warn_unresolved_placeholders: bool,
+) -> None:
+    """Emit the two opt-in warnings.
+
+    Silent by default, so existing consumers keep their current behaviour while
+    the reports stay populated for a consumer that renders its own diagnostic.
+    """
+    if warn_unknown_keys and unknown_keys:
+        logger.warning(
+            "[ConfigStore] 以下配置键没有对应字段，已被忽略：{}（如属笔误请修正，如属新增配置请先加字段）",
+            ", ".join(unknown_keys),
+        )
+    if warn_unresolved_placeholders and unresolved:
+        logger.warning(
+            "[ConfigStore] 以下环境变量未设置且无默认值，占位符按字面量保留：{}（应在 .env.local 或进程环境注入）",
+            ", ".join(unresolved),
+        )
 
 
 __all__ = [
