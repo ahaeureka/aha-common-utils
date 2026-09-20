@@ -20,8 +20,9 @@ from __future__ import annotations
 import json as _json
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, get_args, get_origin
 
 from .config_base import BaseParameters
 from .config_file_parser import load_env_file
@@ -1030,6 +1031,11 @@ def _collect_unknown_keys(
                     walk(value, annotation, f"{path}.")
                 continue
             if isinstance(value, dict):
+                if _is_mapping_type(annotation):
+                    # A mapping field (``dict[str, str]``) *is* a TOML table: its keys
+                    # are data, not field names. Reporting them would flag a
+                    # perfectly valid config as misspelled.
+                    continue
                 # A table where a scalar was declared: nothing under it can be
                 # consumed either, so report the leaves.
                 unknown.extend(_leaf_paths(value, f"{path}."))
@@ -1037,6 +1043,12 @@ def _collect_unknown_keys(
     walk(raw_data, config_class, "")
     return tuple(sorted(unknown))
 
+
+
+def _is_mapping_type(annotation: Any) -> bool:
+    """Whether *annotation* is a mapping type (``dict[...]`` / ``Mapping[...]``)."""
+    origin = get_origin(annotation) or annotation
+    return isinstance(origin, type) and issubclass(origin, Mapping)
 
 def _leaf_paths(node: dict[str, Any], prefix: str) -> list[str]:
     """Dotted paths of every leaf value under *node*."""
