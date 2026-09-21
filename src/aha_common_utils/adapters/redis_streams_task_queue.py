@@ -28,6 +28,7 @@ class RedisStreamsTaskQueue(TaskQueuePort):
         consumer_prefix: str = "",
         max_stream_length: int = 100_000,
         idle_claim_ms: int = 300_000,
+        read_block_ms: int = 2_000,
         envelope_to_dict: EnvelopeToDict | None = None,
         envelope_from_dict: EnvelopeFromDict | None = None,
         increment_attempt: IncrementAttempt | None = None,
@@ -42,6 +43,7 @@ class RedisStreamsTaskQueue(TaskQueuePort):
         self._consumer_prefix = consumer_prefix
         self._max_stream_length = max_stream_length
         self._idle_claim_ms = idle_claim_ms
+        self._read_block_ms = read_block_ms
         self._envelope_to_dict = envelope_to_dict or _default_envelope_to_dict
         self._envelope_from_dict = envelope_from_dict or TaskEnvelope.from_dict
         self._increment_attempt = increment_attempt or _default_increment_attempt
@@ -58,6 +60,7 @@ class RedisStreamsTaskQueue(TaskQueuePort):
         consumer_prefix: str = "",
         max_stream_length: int = 100_000,
         idle_claim_ms: int = 300_000,
+        read_block_ms: int = 2_000,
         envelope_to_dict: EnvelopeToDict | None = None,
         envelope_from_dict: EnvelopeFromDict | None = None,
         increment_attempt: IncrementAttempt | None = None,
@@ -71,6 +74,7 @@ class RedisStreamsTaskQueue(TaskQueuePort):
             consumer_prefix=consumer_prefix,
             max_stream_length=max_stream_length,
             idle_claim_ms=idle_claim_ms,
+            read_block_ms=read_block_ms,
             envelope_to_dict=envelope_to_dict,
             envelope_from_dict=envelope_from_dict,
             increment_attempt=increment_attempt,
@@ -96,7 +100,7 @@ class RedisStreamsTaskQueue(TaskQueuePort):
                 consumername=f"{self._consumer_prefix}{consumer_id}",
                 streams={self._stream: ">"},
                 count=1,
-                block=2000,
+                block=self._read_block_ms,
             )
         except Exception:
             return None
@@ -168,7 +172,9 @@ class RedisStreamsTaskQueue(TaskQueuePort):
         except Exception:
             logger.warning("Failed to parse TaskEnvelope from queue message", exc_info=True)
             return None
-        self._message_ids[envelope.task_id] = message_id.decode("utf-8") if isinstance(message_id, bytes) else str(message_id)
+        self._message_ids[envelope.task_id] = (
+            message_id.decode("utf-8") if isinstance(message_id, bytes) else str(message_id)
+        )
         return envelope
 
 
