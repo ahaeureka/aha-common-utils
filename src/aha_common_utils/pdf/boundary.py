@@ -120,6 +120,7 @@ def resolve_front_matter_boundary(
         signals=signals,
     )
 
+
 def apply_zones(
     sections: Sequence[PdfSection],
     decision: FrontMatterDecision,

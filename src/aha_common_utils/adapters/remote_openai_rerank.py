@@ -84,15 +84,10 @@ class RemoteOpenAIRerankProvider(RerankProviderPort):
             timeout=self._request_timeout_seconds,
         )
         if response.status_code != 200:
-            raise RerankServiceError(
-                f"rerank service returned HTTP {response.status_code}: {response.text}"
-            )
+            raise RerankServiceError(f"rerank service returned HTTP {response.status_code}: {response.text}")
         body = response.json()
         results = body.get("results", []) if isinstance(body, dict) else []
-        scores = [
-            RerankScore(index=int(item["index"]), score=float(item["relevance_score"]))
-            for item in results
-        ]
+        scores = [RerankScore(index=int(item["index"]), score=float(item["relevance_score"])) for item in results]
         scores.sort(key=lambda s: s.score, reverse=True)
         return scores
 

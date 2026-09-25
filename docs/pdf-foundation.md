@@ -177,38 +177,51 @@ PDF 文件 ── L0 文本层提取 ──► PdfPage{text, page_label}        
 
 PdfZone = Literal["front_matter", "body", "back_matter"]
 PdfBlockKind = Literal[
-    "heading", "paragraph", "table", "figure", "caption",
-    "formula", "header", "footer", "page_number",
-    "toc_content", "reference", "decorative",
+    "heading",
+    "paragraph",
+    "table",
+    "figure",
+    "caption",
+    "formula",
+    "header",
+    "footer",
+    "page_number",
+    "toc_content",
+    "reference",
+    "decorative",
 ]
+
 
 @dataclass(frozen=True, slots=True)
 class PdfBlock:
     kind: PdfBlockKind
     text: str
     page_number: int
-    level: int | None = None          # heading 层级（1..N）
-    bbox: list[float] = field(default_factory=list)   # 版面分析证据
+    level: int | None = None  # heading 层级（1..N）
+    bbox: list[float] = field(default_factory=list)  # 版面分析证据
     source: Literal["text", "ocr"] = "text"
     metadata: JsonObject = field(default_factory=dict)
+
 
 @dataclass(frozen=True, slots=True)
 class PdfPage:
     page_number: int
     text: str
     blocks: list[PdfBlock]
-    page_label: str | None = None     # PageLabels 罗马/阿拉伯
+    page_label: str | None = None  # PageLabels 罗马/阿拉伯
     metadata: JsonObject = field(default_factory=dict)
+
 
 @dataclass(frozen=True, slots=True)
 class PdfSection:
     section_id: str
     title: str
-    zone: PdfZone = "body"            # front matter 分区在管线内即产出
+    zone: PdfZone = "body"  # front matter 分区在管线内即产出
     page_start: int = 0
     page_end: int = 0
     blocks: list[PdfBlock] = field(default_factory=list)
     assets: list[PdfAsset] = field(default_factory=list)
+
 
 @dataclass(frozen=True, slots=True)
 class PdfAsset:
@@ -217,33 +230,40 @@ class PdfAsset:
     ext: str
     origin: str
 
+
 @dataclass(frozen=True, slots=True)
 class PdfDocument:
     pages: list[PdfPage]
     sections: list[PdfSection]
-    outline: JsonObject | None = None   # L0 书签树（front matter/章节树消费）
+    outline: JsonObject | None = None  # L0 书签树（front matter/章节树消费）
     page_labels: list[str] = field(default_factory=list)
     metadata: JsonObject = field(default_factory=dict)
 
+
 # ── front matter 边界裁决专属 ──────────────────────────────────────
+
 
 @dataclass(frozen=True, slots=True)
 class PdfStructuralSignal:
     """L0 权威信号：outline 树 + PageLabels 跨度。"""
+
     first_chapter_page: int | None = None
     page_labels: list[str] = field(default_factory=list)
     outline: JsonObject | None = None
 
+
 @dataclass(frozen=True, slots=True)
 class FrontMatterDecision:
     """边界裁决结果（默认 fail-open：无足够证据时 boundary=None）。"""
-    boundary_page: int | None          # None = 判定为无 front matter（whole 正文）
+
+    boundary_page: int | None  # None = 判定为无 front matter（whole 正文）
     confidence: float
-    signals: list[str]                 # 命中的信号名（audit 用）
+    signals: list[str]  # 命中的信号名（audit 用）
+
 
 class FrontMatterPolicy:
-    strategy: str = "auto"             # auto | outline | none
-    zone_action: str = "separate"      # drop | separate | keep
+    strategy: str = "auto"  # auto | outline | none
+    zone_action: str = "separate"  # drop | separate | keep
 ```
 
 **契约规则**：只有 `Literal`/`JsonObject`/bytes，无任何领域类型——任何项目可无痛消费。
@@ -297,16 +317,18 @@ aha_common_utils/pdf/
 ```python
 # aha_common_utils/pdf/pipeline.py（形态示意）
 
+
 @dataclass(frozen=True, slots=True)
 class PdfPipelineConfig:
     language: str = "Chinese"
     extract_assets: bool = True
-    front_matter: str = "auto"          # auto | outline | none
-    zone_action: str = "separate"       # drop | separate | keep
+    front_matter: str = "auto"  # auto | outline | none
+    zone_action: str = "separate"  # drop | separate | keep
     page_text_extractor: PdfTextExtractor | None = None
     ocr: OcrProviderPort | None = None
-    llm: LLMProviderPort | None = None      # 依赖注入（L3 启发式/思路 C 打标用；复用 ports.llm_provider）
+    llm: LLMProviderPort | None = None  # 依赖注入（L3 启发式/思路 C 打标用；复用 ports.llm_provider）
     page_renderer: PageRenderer | None = None
+
 
 class PdfPipeline:
     def __init__(self, config: PdfPipelineConfig) -> None: ...
@@ -314,19 +336,23 @@ class PdfPipeline:
         """L0 文本层 → 空页 OCR → 版面块结构化 → 章节聚合 → front matter 分区。"""
         ...
 
+
 # ── front matter 边界裁决（L5 内部组件）──
+
 
 def extract_structural_signals(path: Path) -> PdfStructuralSignal:
     """outline 树首章页码 + PageLabels 跨度；无则返回空信号。"""
 
+
 def resolve_front_matter_boundary(
     *,
     signal: PdfStructuralSignal | None,
-    pages: Sequence[PageProbe],       # 页码 + 页眉状态 + 布局 label 汇总
-    toc_anchor: int | None,          # 来自业务侧 TOC resolver 或第一标题页
+    pages: Sequence[PageProbe],  # 页码 + 页眉状态 + 布局 label 汇总
+    toc_anchor: int | None,  # 来自业务侧 TOC resolver 或第一标题页
     policy: FrontMatterPolicy,
 ) -> FrontMatterDecision:
     """L0 命中 lock → L1/L2 校验 → L3 兜底；默认 fail-open。"""
+
 
 def apply_zones(
     sections: Sequence[PdfSection],

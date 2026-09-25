@@ -45,6 +45,7 @@ install_fastapi_trace_middleware(app)
 # 3. 业务代码中手动创建子 Span
 tracer = get_tracer(__name__)
 
+
 def process_order(order_id: str):
     with tracer.start_as_current_span("process_order") as span:
         span.set_attribute("order.id", order_id)
@@ -66,8 +67,7 @@ def setup_tracing(
     service_name: str = "app",
     otlp_endpoint: Optional[str] = None,
     enable_console: bool = False,
-) -> trace.Tracer:
-    ...
+) -> trace.Tracer: ...
 ```
 
 ### 参数说明
@@ -115,8 +115,7 @@ from aha_common_utils.tracing import install_fastapi_trace_middleware
 def install_fastapi_trace_middleware(
     app: FastAPI,
     tracer_name: str = "aha_common_utils.tracing",
-) -> None:
-    ...
+) -> None: ...
 ```
 
 为 FastAPI 安装请求级 Tracing 中间件。每个 HTTP 请求会自动创建一个根 Span，名称为 `"METHOD /path"`，例如：
@@ -141,8 +140,7 @@ tracer = get_tracer(__name__)
 ### 函数签名
 
 ```python
-def get_tracer(name: str = "aha_common_utils.tracing") -> trace.Tracer:
-    ...
+def get_tracer(name: str = "aha_common_utils.tracing") -> trace.Tracer: ...
 ```
 
 获取一个以 `name` 为 instrumentation library 名称的 `Tracer` 实例。业务代码始终传入 `__name__`。
@@ -201,7 +199,7 @@ from opentelemetry.trace import get_current_span
 span = get_current_span()
 ctx = span.get_span_context()
 trace_id = format(ctx.trace_id, "032x")
-span_id  = format(ctx.span_id,  "016x")
+span_id = format(ctx.span_id, "016x")
 ```
 
 ---
@@ -228,6 +226,7 @@ from fastapi import FastAPI
 from aha_common_utils.logging import setup_logging
 from aha_common_utils.tracing import setup_tracing, install_fastapi_trace_middleware
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 顺序：1. Tracing  2. Logging  3. 中间件
@@ -238,6 +237,7 @@ async def lifespan(app: FastAPI):
     setup_logging(level="INFO", log_dir="logs")
     install_fastapi_trace_middleware(app)
     yield
+
 
 app = FastAPI(lifespan=lifespan)
 ```

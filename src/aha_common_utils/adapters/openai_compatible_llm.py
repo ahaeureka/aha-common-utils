@@ -204,6 +204,7 @@ def _to_langchain_messages(messages: list[LLMMessage]) -> list[dict[str, object]
             for block in content:
                 if hasattr(block, "__dataclass_fields__"):
                     from dataclasses import asdict
+
                     blocks.append(asdict(block))
                 elif isinstance(block, dict):
                     blocks.append(block)

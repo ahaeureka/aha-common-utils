@@ -100,10 +100,7 @@ class LlamaCppRerankProvider(RerankProviderPort):
         embeddings = cast("list[list[float]]", await asyncio.to_thread(model.embed, pairs))
         scores = self._scores_from_embeddings(embeddings)
 
-        results = [
-            RerankScore(index=index, score=score)
-            for index, score in enumerate(scores)
-        ]
+        results = [RerankScore(index=index, score=score) for index, score in enumerate(scores)]
         results.sort(key=lambda item: item.score, reverse=True)
         if top_k is not None:
             results = results[:top_k]

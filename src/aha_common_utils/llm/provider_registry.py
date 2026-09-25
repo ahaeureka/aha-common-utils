@@ -56,9 +56,7 @@ def register_llm_provider(name: str, provider_cls: type[LLMProviderPort]) -> typ
     return register_provider_class(name, provider_cls)
 
 
-def register_embedding_provider(
-    name: str, provider_cls: type[EmbeddingProviderPort]
-) -> type[EmbeddingProviderPort]:
+def register_embedding_provider(name: str, provider_cls: type[EmbeddingProviderPort]) -> type[EmbeddingProviderPort]:
     """Register a non-singleton embedding provider implementation."""
     return register_provider_class(name, provider_cls)
 

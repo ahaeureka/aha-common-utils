@@ -190,12 +190,15 @@ async def test_fake_file_storage_scans_uploads_and_resets() -> None:
     storage.reset()
 
     assert storage.files == {}
-    assert await storage.upload_file(
-        filename="doc.pdf",
-        content=b"%PDF",
-        content_type="application/pdf",
-        folder="uploads",
-    ) == "file-1"
+    assert (
+        await storage.upload_file(
+            filename="doc.pdf",
+            content=b"%PDF",
+            content_type="application/pdf",
+            folder="uploads",
+        )
+        == "file-1"
+    )
 
 
 async def test_fake_failure_mixin_accepts_string_messages() -> None:
@@ -684,7 +687,7 @@ def test_typed_provider_registry_helpers_create_and_list_instances() -> None:
 class _FakeChatModel:
     """Minimal LangChain-compatible fake for testing OpenAICompatibleLLMProvider."""
 
-    def __init__(self, response_content: str = "{\"answer\": 42}") -> None:
+    def __init__(self, response_content: str = '{"answer": 42}') -> None:
         self.response_content = response_content
         self.ainvoke_calls: list[object] = []
         self.ainvoke_configs: list[object] = []
@@ -755,7 +758,7 @@ class _FakeStructuredRunnable:
 async def test_openai_compatible_llm_provider_parses_json_response() -> None:
     from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
 
-    chat_model = _FakeChatModel(response_content="{\"answer\": 42}")
+    chat_model = _FakeChatModel(response_content='{"answer": 42}')
     provider = OpenAICompatibleLLMProvider(
         base_url="https://llm.example.test/v1",
         api_key="secret-token",
@@ -779,7 +782,7 @@ async def test_openai_compatible_llm_provider_parses_json_response() -> None:
 async def test_openai_compatible_llm_provider_fenced_json_response() -> None:
     from aha_common_utils.adapters.openai_compatible_llm import OpenAICompatibleLLMProvider
 
-    chat_model = _FakeChatModel(response_content="```json\n{\"answer\": 42}\n```")
+    chat_model = _FakeChatModel(response_content='```json\n{"answer": 42}\n```')
     provider = OpenAICompatibleLLMProvider(
         base_url="https://llm.example.test/v1",
         api_key="secret-token",
@@ -808,9 +811,19 @@ async def test_openai_compatible_llm_provider_structured_output() -> None:
 
     result = await provider.complete_json(
         messages=[LLMMessage(role="user", content="Extract")],
-        schema=type("Person", (), {"__name__": "Person", "model_json_schema": classmethod(lambda cls: {  # type: ignore[arg-type]
-            "type": "object", "properties": {"name": {"type": "string"}, "score": {"type": "integer"}}
-        })}),
+        schema=type(
+            "Person",
+            (),
+            {
+                "__name__": "Person",
+                "model_json_schema": classmethod(
+                    lambda cls: {  # type: ignore[arg-type]
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}, "score": {"type": "integer"}},
+                    }
+                ),
+            },
+        ),
         temperature=0.4,
         max_tokens=64,
     )
@@ -853,8 +866,24 @@ async def test_openai_compatible_llm_provider_stream_events() -> None:
 
     chat_model = _FakeChatModel()
     chat_model.astream_events_chunks = [
-        {"event": "on_chat_model_start", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {}},
-        {"event": "on_chat_model_stream", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {"chunk": "Hi"}},
+        {
+            "event": "on_chat_model_start",
+            "name": "ChatModel",
+            "run_id": "r1",
+            "parent_ids": [],
+            "tags": [],
+            "metadata": {},
+            "data": {},
+        },
+        {
+            "event": "on_chat_model_stream",
+            "name": "ChatModel",
+            "run_id": "r1",
+            "parent_ids": [],
+            "tags": [],
+            "metadata": {},
+            "data": {"chunk": "Hi"},
+        },
     ]
     provider = OpenAICompatibleLLMProvider(
         base_url="https://llm.example.test/v1",
@@ -926,10 +955,28 @@ async def test_fake_llm_provider_stream_events_yields_configured_events() -> Non
     from aha_common_utils.testing.fakes.llm_provider import FakeLLMProvider
 
     provider = FakeLLMProvider()
-    provider.set_event_chunks([
-        {"event": "on_chat_model_stream", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {}},
-        {"event": "on_chat_model_end", "name": "ChatModel", "run_id": "r1", "parent_ids": [], "tags": [], "metadata": {}, "data": {}},
-    ])
+    provider.set_event_chunks(
+        [
+            {
+                "event": "on_chat_model_stream",
+                "name": "ChatModel",
+                "run_id": "r1",
+                "parent_ids": [],
+                "tags": [],
+                "metadata": {},
+                "data": {},
+            },
+            {
+                "event": "on_chat_model_end",
+                "name": "ChatModel",
+                "run_id": "r1",
+                "parent_ids": [],
+                "tags": [],
+                "metadata": {},
+                "data": {},
+            },
+        ]
+    )
 
     events: list[dict[str, object]] = []
     async for event in provider.stream_events(messages=[LLMMessage(role="user", content="Hi")]):
@@ -959,7 +1006,7 @@ def test_llm_json_helpers_parse_fenced_content_and_coerce_objects() -> None:
         answer: int
 
     class MessageResponse:
-        content = "```json\n{\"answer\": 42}\n```"
+        content = '```json\n{"answer": 42}\n```'
 
     class ErrorResponse:
         text = "bad request"
@@ -968,9 +1015,9 @@ def test_llm_json_helpers_parse_fenced_content_and_coerce_objects() -> None:
     class ApiError(Exception):
         response = ErrorResponse()
 
-    assert extract_content({"content": "{\"answer\": 1}"}) == "{\"answer\": 1}"
+    assert extract_content({"content": '{"answer": 1}'}) == '{"answer": 1}'
     assert parse_json_content(MessageResponse()) == {"answer": 42}
-    assert extract_json_block("prefix {\"answer\": 7} suffix") == {"answer": 7}
+    assert extract_json_block('prefix {"answer": 7} suffix') == {"answer": 7}
     assert coerce_json_object(DataclassResponse(answer=8)) == {"answer": 8}
     assert coerce_json_object(PydanticResponse(answer=9)) == {"answer": 9}
     assert extract_request_id_from_exception(ApiError()) == "req-42"

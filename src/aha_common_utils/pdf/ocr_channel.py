@@ -72,9 +72,7 @@ class OcrChannel:
             if page_num in blanks:
                 assert renderer is not None  # blanks 非空时上方已校验
                 image_path = renderer(pdf_path, page_num)
-                result = await self._provider.recognize_file(
-                    image_path, language=self._config.language
-                )
+                result = await self._provider.recognize_file(image_path, language=self._config.language)
                 out.append(result.markdown or result.text)
             else:
                 out.append(text)
