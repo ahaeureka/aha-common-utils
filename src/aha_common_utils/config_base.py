@@ -18,7 +18,17 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 from pydantic.fields import FieldInfo
 
 # ── Regex for ${env:VAR:-default} interpolation ──────────────────────
-ENV_VAR_PATTERN = re.compile(r"\$\{env:([^:}]+)(?::-([^}]+))?\}")
+#: The default may be **empty**: `${env:NAME:-}` means "blank when unset". With the
+#: previous `[^}]+` the form matched nothing, so the literal stayed in the config and
+#: the miss was invisible (the unresolved-name report uses this same pattern).
+ENV_VAR_PATTERN = re.compile(r"\$\{env:([^:}]+)(?::-([^}]*))?\}")
+
+#: URL userinfo (`scheme://user:pass@host`) — the part that carries credentials.
+#: Non-greedy and excluding `/`, so an `@` inside a path never turns a plain URL into
+#: a match.
+_URL_USERINFO_PATTERN = re.compile(
+    r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*)://(?P<userinfo>[^/?#\s]*?)@(?P<rest>.*)$"
+)
 
 # ── Sensitive-field constants ────────────────────────────────────────
 SENSITIVE_SUBSTRINGS: frozenset[str] = frozenset(
@@ -96,6 +106,61 @@ def mask_value(value: object) -> str:
         return repr(value)
     return s[:4] + "****" if len(s) > 4 else "****"
 
+
+
+def mask_url_credentials(value: str) -> str:
+    """Replace the userinfo section of a URL with ``****``.
+
+    Credentials are frequently carried by a value whose **name** says nothing about
+    them: ``url`` / ``endpoint`` / ``dsn`` hold ``redis://:pass@host`` and
+    ``postgresql://user:pass@host``, and ``is_sensitive_field("url")`` is ``False``.
+    Masking by name alone therefore logs those DSNs in full.
+
+    Only the userinfo is replaced — scheme, host, port and path are what make the log
+    line useful, so they stay.
+
+    Args:
+        value: Any string; non-URL strings are returned unchanged.
+
+    Returns:
+        The URL with ``userinfo`` replaced by ``****``, or the input unchanged.
+
+    Examples:
+        >>> mask_url_credentials("redis://:pw@127.0.0.1:6379/2")
+        'redis://****@127.0.0.1:6379/2'
+        >>> mask_url_credentials("http://example.invalid/api")
+        'http://example.invalid/api'
+    """
+    match = _URL_USERINFO_PATTERN.match(value)
+    if match is None:
+        return value
+    return f"{match.group('scheme')}://****@{match.group('rest')}"
+
+
+def redact_for_log(field_name: str, value: object) -> object:
+    """Render *value* for a log line, masking secrets by name and by content.
+
+    Two independent checks, because either alone leaks:
+
+    1. ``is_sensitive_field(field_name)`` catches ``password`` / ``api_key`` / ``token``;
+    2. :func:`mask_url_credentials` catches a credentialed DSN hiding under a name that
+       looks harmless (``url``).
+
+    Non-matching values are returned **unchanged**, so diagnostics keep their types and
+    the log line stays readable — redaction must not turn into deletion.
+
+    Args:
+        field_name: Parameter name as it appears in the constructor signature.
+        value: The parameter value.
+
+    Returns:
+        A masked string when the name or the content looks sensitive, otherwise *value*.
+    """
+    if is_sensitive_field(field_name):
+        return mask_value(value)
+    if isinstance(value, str):
+        return mask_url_credentials(value)
+    return value
 
 # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -490,4 +555,6 @@ __all__ = [
     "INSECURE_DEFAULT_VALUES",
     "is_sensitive_field",
     "mask_value",
+    "mask_url_credentials",
+    "redact_for_log",
 ]

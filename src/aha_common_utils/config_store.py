@@ -31,7 +31,15 @@ from .logging import get_logger
 logger = get_logger(__name__)
 
 # ── Regex for ${env:VAR:-default} interpolation ──────────────────────────
-_ENV_VAR_PATTERN = re.compile(r"\$\{env:([^:}]+)(?::-([^}]+))?\}")
+#: The default value may be **empty** (`${env:NAME:-}` means "blank when unset").
+#: With `[^}]+` that form matched nothing and silently stayed a literal string —
+#: and because the unresolved-name report scans with this same pattern, it also
+#: produced no warning: a wrong value with no signal anywhere.
+_ENV_VAR_PATTERN = re.compile(r"\$\{env:([^:}]+)(?::-([^}]*))?\}")
+
+#: Anything that still looks like a placeholder *after* interpolation. Used to
+#: report unrecognized forms instead of letting them become literal values.
+_RESIDUAL_TOKEN_PATTERN = re.compile(r"\$\{[^}]*\}")
 
 
 # ── Helper: convert plain values to tomlkit types ─────────────────────────
@@ -80,6 +88,52 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
 
 
 # ── Helper: env-var interpolation ─────────────────────────────────────────
+
+
+def residual_placeholder_tokens(value: str) -> tuple[str, ...]:
+    """Return the ``${...}`` tokens still present in *value*, in order.
+
+    Compares against the **result** of interpolation, not the source, so it reports
+    exactly the forms this module did not understand. Two shapes are covered: an
+    unrecognized but closed token (``${NOT_ENV:NAME}``) and a dangling ``${`` with no
+    closing brace — the latter is why a pure token-pattern scan is not enough.
+
+    Args:
+        value: Any string, typically a config value after interpolation.
+
+    Returns:
+        Tokens in source order; empty when nothing placeholder-like remains.
+    """
+    tokens = [match.group(0) for match in _RESIDUAL_TOKEN_PATTERN.finditer(value)]
+    dangling = value.find("${")
+    if dangling != -1 and not any(token.startswith(value[dangling:]) for token in tokens):
+        tokens.append(value[dangling:])
+    return tuple(tokens)
+
+
+def find_residual_placeholder_paths(data: Any, prefix: str = "") -> tuple[tuple[str, str], ...]:
+    """Locate residual placeholders in *data*, returning ``(dotted_path, token)`` pairs.
+
+    A report of tokens alone does not tell you **which key** to fix; the dotted path is
+    the actionable half. Used by :meth:`ConfigStore.load` for its error message.
+
+    Args:
+        data: Any nested structure of dicts, lists and scalars.
+        prefix: Dotted path of *data* itself, for recursive calls.
+
+    Returns:
+        One pair per offending value, in traversal order.
+    """
+    found: list[tuple[str, str]] = []
+    if isinstance(data, str):
+        found.extend((prefix, token) for token in residual_placeholder_tokens(data))
+    elif isinstance(data, dict):
+        for key, value in data.items():
+            found.extend(find_residual_placeholder_paths(value, f"{prefix}.{key}" if prefix else str(key)))
+    elif isinstance(data, (list, tuple)):
+        for index, value in enumerate(data):
+            found.extend(find_residual_placeholder_paths(value, f"{prefix}[{index}]"))
+    return tuple(found)
 
 
 def _interpolate_env_vars(
@@ -381,6 +435,7 @@ class ConfigStore:
         self._raw_data: dict[str, Any] | None = None
         self._unknown_keys: tuple[str, ...] = ()
         self._unresolved_placeholders: tuple[str, ...] = ()
+        self._residual_placeholders: tuple[tuple[str, str], ...] = ()
         self._unknown_env_keys: tuple[str, ...] = ()
         self._dotenv_keys: frozenset[str] = frozenset()
 
@@ -412,12 +467,29 @@ class ConfigStore:
     def unresolved_placeholders(self) -> tuple[str, ...]:
         """Names referenced by ``${env:NAME}`` with no value and no ``:-default``.
 
+        A ``${env:NAME:-}`` (empty default) is **not** unresolved: it resolves to an
+        empty string, which is what an empty default asks for.
+
         The configured value is left as the literal ``${env:NAME}`` — this
         report only makes the miss observable; it does not change semantics.
 
         Empty until a successful :meth:`load`.
         """
         return self._unresolved_placeholders
+
+    @property
+    def residual_placeholders(self) -> tuple[tuple[str, str], ...]:
+        """``(dotted_path, token)`` for values that still look like a placeholder.
+
+        These are the forms interpolation did **not** recognize: an unknown shape
+        such as ``${NOT_ENV:NAME}``, or a dangling ``${`` with no closing brace.
+        Reporting them is what keeps "a placeholder nobody understood" from being
+        indistinguishable from a deliberately literal string — the failure mode
+        that made ``${env:NAME:-}`` a silent wrong value.
+
+        Empty until a successful :meth:`load`.
+        """
+        return self._residual_placeholders
 
     @property
     def unknown_env_keys(self) -> tuple[str, ...]:
@@ -445,6 +517,8 @@ class ConfigStore:
         blank_unresolved_placeholders: bool = False,
         warn_unknown_keys: bool = False,
         warn_unresolved_placeholders: bool = False,
+        reject_residual_placeholders: bool = False,
+        warn_residual_placeholders: bool = False,
     ) -> BaseParameters:
         """Load, merge, and construct a config model from files and env.
 
@@ -476,6 +550,13 @@ class ConfigStore:
                 Defaults to ``False``; the report is populated either way.
             warn_unresolved_placeholders: Emit a warning listing
                 :attr:`unresolved_placeholders`. Defaults to ``False``.
+            reject_residual_placeholders: Raise ``ValueError`` naming the key path and
+                the offending token when a value still looks like a placeholder after
+                interpolation. An unrecognized placeholder form would otherwise become a
+                literal value — indistinguishable from a deliberately literal string.
+                Defaults to ``False`` so existing consumers keep their behaviour.
+            warn_residual_placeholders: Emit a warning listing
+                :attr:`residual_placeholders` instead of raising. Defaults to ``False``.
 
         Returns:
             An instance of *config_class* populated from all sources.
@@ -541,6 +622,18 @@ class ConfigStore:
                 merged = {}
             self._unresolved_placeholders = tuple(sorted(unresolved))
 
+            # 6b. Residual placeholders: shapes interpolation did not recognize.
+            #     Reported against the merged dict (not the raw token set) so the
+            #     message can name the key path; without this they stay literal values.
+            self._residual_placeholders = find_residual_placeholder_paths(merged)
+            if self._residual_placeholders and reject_residual_placeholders:
+                rendered = "; ".join(f"{path}='{token}'" for path, token in self._residual_placeholders)
+                raise ValueError(
+                    f"configuration still contains unrecognized placeholders after interpolation: {rendered} "
+                    "(supported forms: ${env:NAME} and ${env:NAME:-default}; a typo or an unsupported "
+                    "form would otherwise become a literal value)"
+                )
+
             # 7. Apply process env overrides for top-level keys with type coercion
             self._unknown_env_keys = self._apply_env_overrides(
                 merged,
@@ -560,8 +653,10 @@ class ConfigStore:
         _warn_about_reports(
             unknown_keys=self._unknown_keys,
             unresolved=self._unresolved_placeholders,
+            residual=self._residual_placeholders,
             warn_unknown_keys=warn_unknown_keys,
             warn_unresolved_placeholders=warn_unresolved_placeholders,
+            warn_residual_placeholders=warn_residual_placeholders,
         )
 
         return instance
@@ -1066,10 +1161,12 @@ def _warn_about_reports(
     *,
     unknown_keys: tuple[str, ...],
     unresolved: tuple[str, ...],
+    residual: tuple[tuple[str, str], ...],
     warn_unknown_keys: bool,
     warn_unresolved_placeholders: bool,
+    warn_residual_placeholders: bool,
 ) -> None:
-    """Emit the two opt-in warnings.
+    """Emit the opt-in warnings.
 
     Silent by default, so existing consumers keep their current behaviour while
     the reports stay populated for a consumer that renders its own diagnostic.
@@ -1083,6 +1180,12 @@ def _warn_about_reports(
         logger.warning(
             "[ConfigStore] 以下环境变量未设置且无默认值，占位符按字面量保留：{}（应在 .env.local 或进程环境注入）",
             ", ".join(unresolved),
+        )
+    if warn_residual_placeholders and residual:
+        logger.warning(
+            "[ConfigStore] 以下配置值插值后仍含无法识别的占位符，已按字面量保留：{}（支持的形式是 "
+            "${{env:NAME}} 与 ${{env:NAME:-default}}）",
+            ", ".join(f"{path}='{token}'" for path, token in residual),
         )
 
 

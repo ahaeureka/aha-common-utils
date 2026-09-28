@@ -6,6 +6,7 @@ from abc import ABCMeta
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
+from .config_base import redact_for_log
 from .logging import get_logger
 
 T = TypeVar("T")
@@ -1090,7 +1091,13 @@ class ClassFactory:
         filtered_kwargs = {
             name: value for name, value in kwargs.items() if name in signature.parameters and name != "self"
         }
-        logger.debug(f"Filtered kwargs for {impl.__name__}: {filtered_kwargs}")
+        # 只打印**脱敏后**的参数：这行日志的原始形态会带出 Redis 密码与 LLM/Embedding key
+        # （`url` 这类名字不含敏感子串，凭据写在值里，所以脱敏必须同时按名字与按内容判）。
+        logger.debug(
+            "Filtered kwargs for {}: {}",
+            impl.__name__,
+            {name: redact_for_log(name, value) for name, value in filtered_kwargs.items()},
+        )
 
         # 6. 如果是通过 ProviderRegistry 注册且为单例模式，使用其单例机制
         if use_provider_registry and ProviderRegistry.is_singleton(provider_name):
