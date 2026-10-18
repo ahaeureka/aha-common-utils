@@ -142,9 +142,17 @@ def redact_for_log(field_name: str, value: object) -> object:
 
     Two independent checks, because either alone leaks:
 
-    1. ``is_sensitive_field(field_name)`` catches ``password`` / ``api_key`` / ``token``;
-    2. :func:`mask_url_credentials` catches a credentialed DSN hiding under a name that
-       looks harmless (``url``).
+    1. :func:`mask_url_credentials` catches a credentialed DSN — including one hiding
+       under a name that looks harmless (``url``), which the name check cannot see;
+    2. ``is_sensitive_field(field_name)`` catches ``password`` / ``api_key`` / ``token``
+       values that are **not** URLs.
+
+    **Order matters: content first, name second.** The reverse order looks equivalent but
+    is not — ``mask_value`` truncates a string, so a credentialed DSN held by a
+    sensitive-sounding name (``password = "postgresql://u:p@h/db"``) would come out as
+    ``"post****"``: the tail is gone, and whether the password inside survived depends on
+    string length rather than on any rule. Masking the userinfo first is strictly more
+    specific, and it keeps scheme/host/port readable.
 
     Non-matching values are returned **unchanged**, so diagnostics keep their types and
     the log line stays readable — redaction must not turn into deletion.
@@ -154,12 +162,14 @@ def redact_for_log(field_name: str, value: object) -> object:
         value: The parameter value.
 
     Returns:
-        A masked string when the name or the content looks sensitive, otherwise *value*.
+        A masked string when the content or the name looks sensitive, otherwise *value*.
     """
+    if isinstance(value, str):
+        masked = mask_url_credentials(value)
+        if masked != value:
+            return masked
     if is_sensitive_field(field_name):
         return mask_value(value)
-    if isinstance(value, str):
-        return mask_url_credentials(value)
     return value
 
 # ── Internal helpers ──────────────────────────────────────────────────

@@ -147,3 +147,43 @@ def test_dsn_userinfo_is_masked_regardless_of_scheme(dsn: str) -> None:
 
     assert "pw@" not in text
     assert "bearer-token@" not in text
+
+
+# ── 顺序：内容判定必须在名字判定之前 ────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        # 敏感名 + 凭据型 URL：先按名字截断会把 DSN 尾部切掉，是否留住密码取决于字符串长度
+        ("password", f"postgresql://user:{SECRET_PASSWORD}@db.invalid:5432/app"),
+        # 无害名 + 凭据型 URL（名字判定看不见它）
+        ("base_url", REDIS_DSN),
+    ],
+)
+def test_content_check_runs_before_the_name_check(field_name: str, value: str) -> None:
+    """先遮 userinfo、再按名字截断 —— 反过来会得到一个「看长度」的结果。
+
+    `mask_value` 是**截断**（保留前 4 字符 + `****`），`mask_url_credentials` 是**定点替换
+    userinfo**。若先按名字截断，`password = "postgresql://u:p@h/db"` 会变成 `"post****"` ——
+    scheme/host 全丢，而密码是否出现在输出里变成字符串长度的函数。这不是「更保守」，
+    而是把一条规则换成了一个巧合。
+
+    这条用例锁的是顺序：两种顺序在大部分输入上给出相同结论，只在「敏感名 + URL 值」上分叉。
+    """
+    from aha_common_utils.config_base import redact_for_log
+
+    masked = redact_for_log(field_name, value)
+
+    assert SECRET_PASSWORD not in str(masked), f"{field_name} 的凭据泄漏了：{masked!r}"
+    assert "****@db.invalid" in str(masked) or "****@127.0.0.1" in str(masked), (
+        f"应当保留 scheme/host 只遮 userinfo，实际 {masked!r}"
+    )
+
+
+def test_non_sensitive_non_url_values_are_untouched() -> None:
+    """正对照：两个判定都不命中时原样返回（脱敏不得变成删除）。"""
+    from aha_common_utils.config_base import redact_for_log
+
+    assert redact_for_log("host", "127.0.0.1") == "127.0.0.1"
+    assert redact_for_log("pool_size", 10) == 10
