@@ -8,7 +8,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_ROMAN_RE = re.compile(r"^(?=[ivxlcdm]+$)(?:m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$", re.IGNORECASE)
+_ROMAN_RE = re.compile(
+    r"^(?=[ivxlcdm]+$)(?:m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$", re.IGNORECASE
+)
 
 # 语言配置化关键词
 _ZH_COPYRIGHT = ("版权所有", "版权信息", "本书版权")

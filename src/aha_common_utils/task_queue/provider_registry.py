@@ -22,6 +22,10 @@ class TaskQueueConfig:
     url: str
     stream: str = "tasks"
     group: str = "workers"
+    consumer_prefix: str = ""
+    max_stream_length: int = 100_000
+    idle_claim_ms: int = 300_000
+    read_block_ms: int = 2_000
 
 
 class UnknownTaskQueueProviderError(ValueError):
@@ -60,6 +64,10 @@ def create_task_queue(config: TaskQueueConfig) -> TaskQueuePort:
                     "url": config.url,
                     "stream": config.stream,
                     "group": config.group,
+                    "consumer_prefix": config.consumer_prefix,
+                    "max_stream_length": config.max_stream_length,
+                    "idle_claim_ms": config.idle_claim_ms,
+                    "read_block_ms": config.read_block_ms,
                 },
             ),
         )

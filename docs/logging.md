@@ -57,6 +57,7 @@ logger.critical("严重故障")
 
 ```python
 from aha_common_utils.log import init_logging
+
 # 或等价的高层封装：
 from aha_common_utils.logging import setup_logging
 ```
@@ -164,6 +165,7 @@ logger.bind(order_id="o-789", amount=99.9).info("订单创建成功")
 from aha_common_utils.log import request_id_var
 import uuid
 
+
 # 在 HTTP 中间件中注入
 async def request_id_middleware(request: Request, call_next):
     req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
@@ -229,10 +231,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from aha_common_utils.logging import setup_logging
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(level="INFO", log_dir="logs")
     yield
+
 
 app = FastAPI(lifespan=lifespan)
 ```
@@ -255,7 +259,8 @@ setup_logging(level="DEBUG", log_dir="")
 
 ```python
 import loguru
-loguru.logger.disable("")   # 禁用所有模块的日志
+
+loguru.logger.disable("")  # 禁用所有模块的日志
 ```
 
 ### Q: 多次调用 setup_logging 会怎样？

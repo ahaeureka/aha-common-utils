@@ -48,9 +48,6 @@ class PdfPipeline:
         pages = extractor(str(path))
 
         texts = [text for text, _ in pages]
-        page_objects = [
-            PdfPage(page_number=num, text=text)
-            for (_, num), text in zip(pages, texts, strict=True)
-        ]
+        page_objects = [PdfPage(page_number=num, text=text) for (_, num), text in zip(pages, texts, strict=True)]
         sections = accumulate_sections(list(zip(texts, [num for _, num in pages], strict=True)))
         return PdfDocument(pages=page_objects, sections=sections)

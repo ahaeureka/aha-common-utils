@@ -29,12 +29,18 @@ def _write_pdf_with_outline_and_labels() -> bytes:
         w.add_blank_page(width=612, height=792)
     w.add_outline_item("第一章 绪论", 2)  # 0-based index 2 = 物理第 3 页
 
-    labels = DictionaryObject({
-        NameObject("/Nums"): ArrayObject([
-            NumberObject(0), DictionaryObject({NameObject("/S"): NameObject("/r")}),
-            NumberObject(2), DictionaryObject({NameObject("/S"): NameObject("/D")}),
-        ])
-    })
+    labels = DictionaryObject(
+        {
+            NameObject("/Nums"): ArrayObject(
+                [
+                    NumberObject(0),
+                    DictionaryObject({NameObject("/S"): NameObject("/r")}),
+                    NumberObject(2),
+                    DictionaryObject({NameObject("/S"): NameObject("/D")}),
+                ]
+            )
+        }
+    )
     w._root_object[NameObject("/PageLabels")] = labels
 
     buf = io.BytesIO()

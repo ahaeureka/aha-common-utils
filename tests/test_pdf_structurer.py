@@ -26,10 +26,12 @@ def test_accumulator_freeze() -> None:
 
 def test_accumulate_heading_opens_new_section() -> None:
     """heading 开启新章（标题去井号，标题行转 heading 块）。"""
-    chapters = accumulate_sections([
-        ("# 第一章 绪论\n\n正文一。", 1),
-        ("## 第一节\n\n小节内容。", 2),
-    ])
+    chapters = accumulate_sections(
+        [
+            ("# 第一章 绪论\n\n正文一。", 1),
+            ("## 第一节\n\n小节内容。", 2),
+        ]
+    )
     assert [c.title for c in chapters] == ["第一章 绪论", "第一节"]
     assert chapters[0].page_start == 1
     assert chapters[0].blocks[0].level == 1
@@ -41,10 +43,12 @@ def test_accumulate_heading_opens_new_section() -> None:
 
 def test_accumulate_before_first_heading_unnamed_section() -> None:
     """首个 heading 前的正文 → 无名 section（title=""，不丢内容）。"""
-    chapters = accumulate_sections([
-        ("前置正文。", 1),
-        ("# 第一章 绪论", 2),
-    ])
+    chapters = accumulate_sections(
+        [
+            ("前置正文。", 1),
+            ("# 第一章 绪论", 2),
+        ]
+    )
     assert len(chapters) == 2
     assert chapters[0].title == ""
     assert chapters[0].zone == "body"
@@ -54,21 +58,25 @@ def test_accumulate_before_first_heading_unnamed_section() -> None:
 
 def test_accumulate_skips_empty_pages() -> None:
     """空页跳过（不产生空 section）。"""
-    chapters = accumulate_sections([
-        ("", 1),
-        ("# 第一章 绪论", 2),
-    ])
+    chapters = accumulate_sections(
+        [
+            ("", 1),
+            ("# 第一章 绪论", 2),
+        ]
+    )
     assert len(chapters) == 1
     assert chapters[0].page_start == 2
 
 
 def test_accumulate_page_end_correct() -> None:
     """page_end = 章内最后一页（跨页段落归入本章）。"""
-    chapters = accumulate_sections([
-        ("# 序\n\n序言一。", 1),
-        ("序言二。", 2),
-        ("# 第一章 绪论", 3),
-    ])
+    chapters = accumulate_sections(
+        [
+            ("# 序\n\n序言一。", 1),
+            ("序言二。", 2),
+            ("# 第一章 绪论", 3),
+        ]
+    )
     assert chapters[0].page_start == 1
     assert chapters[0].page_end == 2
     assert chapters[1].page_start == 3

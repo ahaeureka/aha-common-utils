@@ -33,11 +33,11 @@ def _write_minimal_pdf(path: Path, text: str) -> None:
         offsets.append(len(out))
         out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
     xref = len(out)
-    out += f"xref\n0 {len(objs)+1}\n".encode()
+    out += f"xref\n0 {len(objs) + 1}\n".encode()
     out += b"0000000000 65535 f \n"
     for off in offsets[1:]:
         out += f"{off:010d} 00000 n \n".encode()
-    out += f"trailer\n<< /Size {len(objs)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     path.write_bytes(bytes(out))
 
 

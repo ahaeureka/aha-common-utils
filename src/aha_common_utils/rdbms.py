@@ -25,9 +25,7 @@ from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel, select, update
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-_RETRYABLE_DB_ERRORS = (
-    sqlalchemy.exc.OperationalError,
-)
+_RETRYABLE_DB_ERRORS = (sqlalchemy.exc.OperationalError,)
 
 logging.basicConfig()
 logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
@@ -255,7 +253,9 @@ class RDBMS:
         wait=wait_fixed(2),
         retry=tenacity.retry_if_exception_type(_RETRYABLE_DB_ERRORS),
     )
-    async def get(self, model_cls: type[TSQLModel], pk: str, session: DatabaseSession | None = None) -> TSQLModel | None:
+    async def get(
+        self, model_cls: type[TSQLModel], pk: str, session: DatabaseSession | None = None
+    ) -> TSQLModel | None:
         """Get an object by primary key.
 
         Args:

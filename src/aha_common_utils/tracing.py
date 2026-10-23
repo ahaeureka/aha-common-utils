@@ -21,6 +21,7 @@ logger = get_logger(__name__)
 def setup_tracing(
     service_name: str = "app",
     otlp_endpoint: str | None = None,
+    insecure: bool = True,
     enable_console: bool = False,
 ) -> trace.Tracer:
     """
@@ -48,7 +49,7 @@ def setup_tracing(
     # 添加OTLP导出器
     if otlp_endpoint:
         try:
-            otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+            otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=insecure)
             provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
             logger.info(f"OpenTelemetry OTLP导出器已配置: {otlp_endpoint}")
         except Exception as e:

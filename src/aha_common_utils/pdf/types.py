@@ -13,13 +13,13 @@ from typing import Any, Literal
 PdfBlockKind = Literal[
     "page_header",  # 页眉
     "page_number",  # 页码
-    "title",        # 标题（书题页）
-    "heading",      # 章节标题
-    "paragraph",    # 正文段落
-    "table",        # 表格
-    "figure",       # 插图
-    "formula",      # 公式
-    "footer",       # 页脚
+    "title",  # 标题（书题页）
+    "heading",  # 章节标题
+    "paragraph",  # 正文段落
+    "table",  # 表格
+    "figure",  # 插图
+    "formula",  # 公式
+    "footer",  # 页脚
 ]
 
 # 内容来源通道

@@ -3,6 +3,7 @@
 契约规则（pdf-foundation.md §6）：只有 Literal / JsonObject / bytes，
 无任何领域类型——任何项目可无痛消费。
 """
+
 import dataclasses
 
 import pytest
@@ -76,6 +77,7 @@ def test_pdf_structural_signal_defaults():
     assert s.page_labels == []
     assert s.outline == []  # 信号总是存在、内容可空（无 outline 即空）
 
+
 def test_front_matter_decision_semantics():
     d = FrontMatterDecision(boundary_page=None, confidence=0.0, signals=[])
     assert d.boundary_page is None  # None = 判定为无 front matter（whole 正文）
@@ -93,8 +95,7 @@ def test_zone_literals():
 
 
 def test_all_contract_types_are_frozen_slots():
-    for cls in (PdfBlock, PdfPage, PdfSection, PdfAsset, PdfDocument,
-                PdfStructuralSignal, FrontMatterDecision):
+    for cls in (PdfBlock, PdfPage, PdfSection, PdfAsset, PdfDocument, PdfStructuralSignal, FrontMatterDecision):
         assert dataclasses.is_dataclass(cls)
         assert cls.__dataclass_params__.frozen is True
         assert cls.__dataclass_params__.slots is True

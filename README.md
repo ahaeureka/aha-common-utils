@@ -54,8 +54,10 @@
 ```python
 from aha_common_utils.config_base import BaseParameters
 
+
 class AppSettings(BaseParameters):
     """应用配置模型。"""
+
     app_env: str = BaseParameters.field(default="development", description="运行环境")
     database_url: str = BaseParameters.field(
         default="postgresql+asyncpg://localhost/dev",
@@ -126,6 +128,10 @@ store.save({"debug": True}, "config.toml", path="app")
 | 7（最高） | 进程环境变量 | 容器/CI 注入，最终覆盖 | — |
 
 > 环境变量支持 `SECTION_FIELD` 命名模式自动路由到嵌套模型。例如 `LLM_API_KEY` 自动映射到 `llm.api_key`，`EMBEDDING_OPENAI_BASE_URL` 自动映射到 `embedding.openai.base_url`。无需手动配置 `env_prefix`。
+
+> **前缀约定**：`ConfigStore` 按 `SECTION_FIELD` 使用**裸名**环境变量（并兼容剥除历史前缀 `W5_FLOW_`）。
+> 因此它不适用于「项目必须有自己前缀」的场景（例如容器/CI 里多项目共用同一环境时要求 `MYAPP_DATABASE_URL`）。
+> 这类项目需要自持一层加载器（读取前缀后映射到字段），或在共享库支持显式前缀后再迁移。
 
 ---
 
@@ -259,6 +265,7 @@ export LLM_API_KEY=sk-prod-xxxxxxxx
 ```python
 from aha_common_utils.config_base import BaseParameters
 
+
 class AppSettings(BaseParameters):
     app_env: str = BaseParameters.field(
         default="development",
@@ -287,12 +294,15 @@ class DatabaseConfig(BaseParameters):
     provider: str = BaseParameters.field(default="sqlmodel-pg")
     pool_size: int = BaseParameters.field(default=10)
 
+
 class LLMConfig(BaseParameters):
     default_model: str = BaseParameters.field(default="openai:gpt-4o-mini")
     api_key: str = BaseParameters.field(default="", tags=["secret"])
 
+
 class AppConfig(BaseParameters):
     """根配置模型。"""
+
     app_env: str = BaseParameters.field(default="development")
     database: DatabaseConfig = BaseParameters.field(default=DatabaseConfig())
     llm: LLMConfig = BaseParameters.field(default=LLMConfig())
@@ -361,6 +371,7 @@ postgres, admin, your-secret-key, dev-only
 class AppSettings(BaseParameters):
     secret_key: str = BaseParameters.field(default="change-me-in-production")
 
+
 # ValueError: [Security] Field 'secret_key' has insecure default 'change-me-in-production'
 #             in production (APP_ENV=production).
 #             Override via .env.local or process environment variable.
@@ -387,8 +398,8 @@ class MyConfig(BaseParameters):
         default=60,
         description="超时时间（秒）",
         tags=["network", "timeout"],
-        fixed=False,   # True 时 update_from() 跳过此字段
-        ge=0,           # 透传 pydantic Field 参数
+        fixed=False,  # True 时 update_from() 跳过此字段
+        ge=0,  # 透传 pydantic Field 参数
     )
 ```
 
@@ -480,6 +491,11 @@ base_url = "${env:LLM_BASE_URL:-https://api.openai.com}"
 
 `SecureBaseSettings`（基于 pydantic-settings）已被 `BaseParameters`（纯 pydantic BaseModel）+ `ConfigStore` 替代。
 
+> ⚠️ **不迁移的后果是「静默失效」**：`SecureBaseSettings` 现在是 `BaseParameters` 的别名，**不读取环境变量与 dotenv**。
+> 继续写 `class AppSettings(SecureBaseSettings)` + `model_config = SettingsConfigDict(env_prefix="MYAPP_")` 时，
+> Python 不会报任何错，但 `MYAPP_*` 环境变量、`config.toml`、`.env.local` **全部被忽略**，`AppSettings()` 永远返回代码默认值。
+> 为避免再次静默，访问 `SecureBaseSettings` 现在会发出 `DeprecationWarning`（下一主版本将直接删除该名字）。
+
 ### 迁移步骤
 
 **1. 替换基类**
@@ -489,12 +505,15 @@ base_url = "${env:LLM_BASE_URL:-https://api.openai.com}"
 from aha_common_utils.settings import SecureBaseSettings
 from pydantic_settings import SettingsConfigDict
 
+
 class AppSettings(SecureBaseSettings):
     model_config = SettingsConfigDict(env_prefix="MYAPP_")
     APP_ENV: str = "development"
 
+
 # 新
 from aha_common_utils.config_base import BaseParameters
+
 
 class AppSettings(BaseParameters):
     app_env: str = BaseParameters.field(default="development")
@@ -512,17 +531,21 @@ class AppSettings(SecureBaseSettings):
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = ""
 
+
 # 新（嵌套领域模型）
 class DatabaseConfig(BaseParameters):
     url: str = BaseParameters.field(default="...")
+
 
 class FalkorDBConfig(BaseParameters):
     host: str = BaseParameters.field(default="localhost")
     port: int = BaseParameters.field(default=16379)
 
+
 class LLMConfig(BaseParameters):
     api_key: str = BaseParameters.field(default="", tags=["secret"])
     base_url: str = BaseParameters.field(default="")
+
 
 class AppConfig(BaseParameters):
     app_env: str = BaseParameters.field(default="development")
@@ -551,6 +574,7 @@ settings = AppSettings()
 
 # 新
 from aha_common_utils.config_store import ConfigStore
+
 store = ConfigStore()
 settings = store.load(AppConfig)
 ```
@@ -639,10 +663,10 @@ APP_ENV = "development"
 
 ```python
 from aha_common_utils.config_base import (
-    BaseParameters,          # 配置模型基类
-    is_sensitive_field,       # 判断字段是否敏感
-    mask_value,               # 屏蔽敏感值（保留前4位）
-    SENSITIVE_SUBSTRINGS,     # 敏感字段关键词集合
+    BaseParameters,  # 配置模型基类
+    is_sensitive_field,  # 判断字段是否敏感
+    mask_value,  # 屏蔽敏感值（保留前4位）
+    SENSITIVE_SUBSTRINGS,  # 敏感字段关键词集合
     INSECURE_DEFAULT_VALUES,  # 不安全默认值集合
 )
 ```
@@ -653,19 +677,19 @@ from aha_common_utils.config_base import (
 from aha_common_utils.config_store import ConfigStore
 
 store = ConfigStore()
-config = store.load(AppConfig)          # 加载
-store.save(config, "config.toml")       # 完整写入
+config = store.load(AppConfig)  # 加载
+store.save(config, "config.toml")  # 完整写入
 store.save(data, "config.toml", path="llm")  # 部分更新
-raw = store.raw_data                     # 原始合并 dict
+raw = store.raw_data  # 原始合并 dict
 ```
 
 ### 低级读写（settings — 兼容保留）
 
 ```python
 from aha_common_utils.settings import (
-    read_config,     # 统一读入口（自动检测格式）
-    write_config,    # 统一写入口（自动检测格式）
-    merge_configs,   # 深度合并多个配置字典
+    read_config,  # 统一读入口（自动检测格式）
+    write_config,  # 统一写入口（自动检测格式）
+    merge_configs,  # 深度合并多个配置字典
 )
 ```
 
@@ -836,6 +860,7 @@ app = CliApp(name="myapp", help="示例应用", no_args_is_help=True)
 
 db = Router(name="db", help="数据库命令")
 
+
 @db.command("upgrade")
 async def db_upgrade(
     url: Annotated[str, EnvOpt("DATABASE_URL", help="DB 连接 URL")],
@@ -844,6 +869,7 @@ async def db_upgrade(
     """升级数据库 schema。"""
     ...
 
+
 @db.command("init")
 def db_init(
     password: Annotated[str, SecretOpt(help="DB 密码", envvar="DB_PASSWORD")],
@@ -851,7 +877,9 @@ def db_init(
     """初始化数据库。"""
     ...
 
+
 app.include_router(db)
+
 
 @app.command("serve")
 def serve(
@@ -861,6 +889,7 @@ def serve(
 ):
     """启动服务。"""
     ...
+
 
 if __name__ == "__main__":
     app.run()
@@ -879,12 +908,15 @@ myapp db init                    # 交互式密码输入 或 $DB_PASSWORD
 #### `Opt` — 通用选项
 
 ```python
-host: Annotated[str, Opt(
-    help="绑定地址",
-    envvar="HOST",       # 从环境变量读取
-    short="-H",          # 短选项
-    show_default=True,
-)] = "0.0.0.0"
+host: Annotated[
+    str,
+    Opt(
+        help="绑定地址",
+        envvar="HOST",  # 从环境变量读取
+        short="-H",  # 短选项
+        show_default=True,
+    ),
+] = "0.0.0.0"
 ```
 
 #### `Arg` — 位置参数
@@ -902,11 +934,14 @@ url: Annotated[str, EnvOpt("DATABASE_URL", help="数据库连接 URL")]
 #### `SecretOpt` — 密码/密钥选项
 
 ```python
-password: Annotated[str, SecretOpt(
-    help="数据库密码",
-    envvar="DB_PASSWORD",
-    confirmation_prompt=True,
-)]
+password: Annotated[
+    str,
+    SecretOpt(
+        help="数据库密码",
+        envvar="DB_PASSWORD",
+        confirmation_prompt=True,
+    ),
+]
 ```
 
 #### `FlagOpt` — 布尔开关
@@ -950,6 +985,7 @@ db = Router(name="db", help="数据库命令")
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
 
 def test_serve():
     result = runner.invoke(app._typer, ["serve", "myapp", "--port", "9000"])
