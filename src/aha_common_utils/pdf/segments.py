@@ -260,3 +260,21 @@ def heading_or_none(para: str) -> int | None:
     if detect_table(para):
         return None
     return pdf_heading_level(para)
+
+
+# 末尾年份需配合引号标题、卷期或文献缩写；单独提及年份不是文献引用。
+_ISO_YEAR_RE = re.compile(r"\b(?:18|19|20)\d{2}\b")
+_QUOTED_TITLE_RE = re.compile(r"[\u201c\"][^\u201d\"]{8,}[\u201d\"]")
+_VOLUME_ISSUE_RE = re.compile(r"\b\d+\s*\(\s*\d+\s*\)")
+_CITATION_ABBREV: tuple[str, ...] = ("et al.", "pp.", "vol.", "eds.", "doi:", "http://", "https://")
+
+
+def is_citation_sentence(text: str) -> bool:
+    """识别带年份及文献形态的引用句，避免其被当作方法证据。"""
+    stripped = text.strip()
+    if not stripped or not _ISO_YEAR_RE.search(stripped):
+        return False
+    if _QUOTED_TITLE_RE.search(stripped) or _VOLUME_ISSUE_RE.search(stripped):
+        return True
+    lowered = stripped.lower()
+    return any(marker in lowered for marker in _CITATION_ABBREV)
