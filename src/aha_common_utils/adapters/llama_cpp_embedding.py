@@ -125,27 +125,29 @@ class LlamaCppEmbeddingProvider(EmbeddingProviderPort):
         return vectors
 
     def _fit_dimension(self, vector: list[float]) -> EmbeddingVector:
-        """把原生维度裁到请求维度（MRL），并重新 L2 归一化。
+        """把原生维度裁到请求维度（MRL），并 **始终** L2 归一化。
 
-        截断后必须重新归一化：MRL 的前 N 维是"可截断"的近似，但截断会改变范数，
-        不归一化会让余弦相似度与未截断向量不可比。请求维度大于原生维度时直接报错
-        ——补零会让不同文本的向量在补齐维度上完全一致，等于伪造相似度。
+        llama.cpp 返回的是未归一化的隐状态（实测 0.6B 的范数约 80），而 Qwen 官方
+        用法在算余弦前显式 ``F.normalize(embeddings, p=2, dim=1)``。因此本方法对
+        **两条路径都归一化**：不归一化时点积不是余弦，且截断路径与原生路径的向量
+        尺度不同，切换模型/维度会静默改变相似度语义。
+
+        请求维度大于原生维度时直接报错——补零会让不同文本在补齐维度上完全一致，
+        等于伪造相似度。
         """
         target = self._embedding_dimension
         native = len(vector)
-        if target == native:
-            return vector
         if target > native:
             raise ValueError(
                 f"requested embedding_dimension={target} exceeds the model's native "
                 f"dimension {native}; padding would fabricate similarity, so pick a "
                 f"smaller target or another model"
             )
-        truncated = vector[:target]
-        norm = math.sqrt(sum(v * v for v in truncated))
+        chosen = vector if target == native else vector[:target]
+        norm = math.sqrt(sum(v * v for v in chosen))
         if norm == 0.0:
-            return truncated
-        return [v / norm for v in truncated]
+            return chosen
+        return [v / norm for v in chosen]
 
     async def close(self) -> None:
         model = self._model

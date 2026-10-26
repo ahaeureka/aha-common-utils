@@ -27,9 +27,12 @@ def test_truncation_keeps_prefix_and_renormalizes() -> None:
     assert math.isclose(math.sqrt(sum(v * v for v in out)), 1.0, rel_tol=1e-9)
 
 
-def test_native_dimension_is_returned_unchanged() -> None:
-    vector = [0.1, 0.2, 0.3]
-    assert _provider(3)._fit_dimension(vector) is vector
+def test_native_dimension_keeps_values_but_is_normalized() -> None:
+    """原生路径也必须归一化：llama.cpp 返回未归一化隐状态，点积不是余弦。"""
+    out = _provider(3)._fit_dimension([3.0, 4.0, 0.0])
+
+    assert out == pytest.approx([0.6, 0.8, 0.0])
+    assert math.isclose(math.sqrt(sum(v * v for v in out)), 1.0, rel_tol=1e-9)
 
 
 def test_larger_than_native_is_rejected_not_padded() -> None:
