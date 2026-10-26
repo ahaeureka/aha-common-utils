@@ -24,6 +24,10 @@ class LLMProviderConfig:
     api_key: str
     model: str
     request_timeout_seconds: float = 60.0
+    #: 透传给厂商的请求体扩展（关思考等）。None = 不传，保持厂商默认。
+    extra_body: dict[str, object] | None = None
+    #: 结构化输出实现方式；空 = 适配器默认（function_calling）。
+    structured_output_method: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +70,20 @@ def available_llm_providers() -> list[str]:
     _ensure_builtin_providers()
     return list(available_provider_names(LLMProviderPort))
 
+def _optional_provider_kwargs(config: LLMProviderConfig) -> dict[str, object]:
+    """只把**显式配置**的可选参数传给 provider 构造器。
+
+    用意：换供应商要能关思考（``extra_body``）和切结构化输出实现（``method``），
+    但把这两个键无条件传下去会让不接受它们的替身/第三方 provider 直接 TypeError。
+    """
+    optional: dict[str, object] = {}
+    if config.extra_body:
+        optional["extra_body"] = dict(config.extra_body)
+    if config.structured_output_method:
+        optional["structured_output_method"] = config.structured_output_method
+    return optional
+
+
 
 def available_embedding_providers() -> list[str]:
     """Return registered embedding provider names."""
@@ -88,6 +106,8 @@ def create_llm_provider(config: LLMProviderConfig) -> LLMProviderPort:
                     "model": config.model,
                 },
                 request_timeout_seconds=config.request_timeout_seconds,
+                # 仅在显式配置时传，避免给不认识这些参数的 provider/替身加必填 kwargs。
+                **_optional_provider_kwargs(config),
             ),
         )
     except UnknownProviderError as exc:
