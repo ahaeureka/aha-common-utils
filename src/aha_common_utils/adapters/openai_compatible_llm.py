@@ -9,7 +9,11 @@ from pydantic import BaseModel, SecretStr, create_model
 
 from aha_common_utils.llm.json_helpers import coerce_json_object, parse_json_content
 from aha_common_utils.llm.usage import record_llm_usage, usage_from_message
-from aha_common_utils.ports.llm_provider import LLMProviderPort
+from aha_common_utils.ports.llm_provider import (
+    LLMProviderPort,
+    ToolCallRequest,
+    ToolChatResult,
+)
 from aha_common_utils.ports.types import JsonObject, LLMMessage
 from aha_common_utils.register import ProviderRegistry
 from aha_common_utils.tracing import get_tracer
@@ -39,6 +43,64 @@ class OpenAICompatibleLLMProvider(LLMProviderPort):
         self.extra_body: dict[str, object] = dict(extra_body or {})
         self.structured_output_method = structured_output_method
         self._chat_model: Any = chat_model or self._build_chat_model()
+
+    async def chat_with_tools(
+        self,
+        *,
+        messages: list[LLMMessage],
+        tools: list[dict[str, object]],
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> ToolChatResult:
+        """带工具调用：把 OpenAI 兼容的工具 schema 交给底层 chat model。
+
+        `tools` 用 **OpenAI function 形态**（`{"type":"function","function":{...}}`），
+        由调用方的 langchain 适配层转换——本层不引入 langchain 类型，
+        否则端口会反向依赖框架。
+        """
+        bound = self._chat_model.bind_tools(tools) if tools else self._chat_model
+        bound = self._bind_model_kwargs(bound, temperature=temperature, max_tokens=max_tokens)
+        raw = await bound.ainvoke([self._to_langchain(msg) for msg in messages])
+        content = raw.content if isinstance(raw.content, str) else str(raw.content or "")
+        calls: list[ToolCallRequest] = []
+        for item in getattr(raw, "tool_calls", None) or ():
+            if isinstance(item, dict):
+                name = str(item.get("name") or "")
+                args = item.get("args") or {}
+                call_id = str(item.get("id") or f"call_{len(calls)}")
+            else:  # pragma: no cover - langchain 也可能给 TypedDict/对象
+                name = str(getattr(item, "name", ""))
+                args = getattr(item, "args", {}) or {}
+                call_id = str(getattr(item, "id", f"call_{len(calls)}"))
+            if name:
+                calls.append(
+                    ToolCallRequest(id=call_id, name=name, arguments=dict(args))
+                )
+        usage = dict(getattr(raw, "usage_metadata", None) or {})
+        return ToolChatResult(content=content, tool_calls=tuple(calls), usage=usage)
+
+    @staticmethod
+    def _to_langchain(message: LLMMessage) -> Any:
+        """端口消息 → langchain 消息（只做形态转换，不做内容改写）。"""
+        from langchain_core.messages import (
+            AIMessage,
+            HumanMessage,
+            SystemMessage,
+            ToolMessage,
+        )
+
+        role = str(getattr(message, "role", "user"))
+        content = getattr(message, "content", "")
+        text = content if isinstance(content, str) else str(content)
+        if role == "system":
+            return SystemMessage(content=text)
+        if role == "assistant":
+            calls = tuple(getattr(message, "tool_calls", ()) or ())
+            return AIMessage(content=text, tool_calls=[dict(call) for call in calls])
+        if role == "tool":
+            tool_call_id = str(getattr(message, "tool_call_id", "") or "")
+            return ToolMessage(content=text, tool_call_id=tool_call_id)
+        return HumanMessage(content=text)
 
     @property
     def chat_model(self) -> Any:

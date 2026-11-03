@@ -41,6 +41,10 @@ LLMContent = str | list[ContentBlock]
 class LLMMessage:
     role: LLMRole
     content: LLMContent
+    #: 工具结果对应的调用 id（role="tool" 时必填；否则上游会拒绝）
+    tool_call_id: str | None = None
+    #: assistant 轮次里的工具调用（回放历史时必须原样带回，否则 OpenAI 会拒"孤立 tool 消息"）
+    tool_calls: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
