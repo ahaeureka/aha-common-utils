@@ -40,6 +40,20 @@ class OpenAICompatibleLLMProvider(LLMProviderPort):
         self.structured_output_method = structured_output_method
         self._chat_model: Any = chat_model or self._build_chat_model()
 
+    @property
+    def chat_model(self) -> Any:
+        """暴露内部持有的 LangChain chat model（供 agent 框架注入使用）。
+
+        为什么需要公开取用器：Deep Agents / LangGraph 的 agent 节点需要**langchain
+        的 chat model**，而本端口内部已经持有一份。没有取用器时，调用方只能按
+        `base_url`/`api_key`/`model`/`extra_body` 再建一份——两份构造会在换模型、
+        改超时、加厂商参数时静默错配（端口换了、agent 没换）。
+
+        返回的是**同一个对象**（不是副本）：改它的配置会同时影响端口与 agent，
+        这正是"单一构造点"的语义。
+        """
+        return self._chat_model
+
     def _build_chat_model(self) -> Any:
         from langchain_openai import ChatOpenAI
 
